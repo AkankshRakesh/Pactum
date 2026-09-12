@@ -1,0 +1,683 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+
+/* ===================================================================
+   Design tokens
+   =================================================================== */
+:root {
+  --paper: #f4efe3;
+  --paper-dark: #ebe4d4;
+  --paper-crease: #ddd5c0;
+  --ink: #1a1810;
+  --ink-faded: rgba(26, 24, 16, 0.45);
+  --ink-ghost: rgba(26, 24, 16, 0.12);
+  --red: #b81c10;
+  --red-light: rgba(184, 28, 16, 0.08);
+  --red-stamp: rgba(184, 28, 16, 0.85);
+  --rule: rgba(26, 24, 16, 0.18);
+  --shadow: rgba(26, 24, 16, 0.12);
+  --tint: rgba(26, 24, 16, 0.018);
+  --tint-strong: rgba(26, 24, 16, 0.04);
+}
+
+.dark {
+  --paper: #151210;
+  --paper-dark: #1c1814;
+  --paper-crease: #241f18;
+  --ink: #e8e0cc;
+  --ink-faded: rgba(232, 224, 204, 0.45);
+  --ink-ghost: rgba(232, 224, 204, 0.08);
+  --red: #cc3322;
+  --red-light: rgba(204, 51, 34, 0.08);
+  --red-stamp: rgba(204, 51, 34, 0.85);
+  --rule: rgba(232, 224, 204, 0.12);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --tint: rgba(232, 224, 204, 0.025);
+  --tint-strong: rgba(232, 224, 204, 0.05);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; padding: 0; }
+
+body {
+  background: var(--paper-dark);
+  color: var(--ink);
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  transition: background 0.35s ease, color 0.35s ease;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg, transparent, transparent 27px,
+    rgba(26, 24, 16, 0.035) 27px, rgba(26, 24, 16, 0.035) 28px
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+a { color: inherit; }
+
+/* ===================================================================
+   Keyframes
+   =================================================================== */
+@keyframes stamp {
+  0%   { transform: rotate(var(--r)) scale(1.6); opacity: 0; }
+  55%  { transform: rotate(var(--r)) scale(0.92); opacity: 1; }
+  70%  { transform: rotate(var(--r)) scale(1.02); }
+  100% { transform: rotate(var(--r)) scale(1); opacity: 1; }
+}
+@keyframes typeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes scrollBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+
+/* ===================================================================
+   Page shell
+   =================================================================== */
+.doc-shell {
+  background: var(--paper);
+  margin: 0 auto;
+  box-shadow: 0 0 80px var(--shadow);
+  transition: background 0.35s ease, box-shadow 0.35s ease;
+}
+
+.mode-toggle {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9999;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: background 0.25s, color 0.25s, border-color 0.25s;
+  box-shadow: 0 2px 12px var(--shadow);
+}
+.mode-toggle:hover { border-color: var(--red); }
+
+/* ===================================================================
+   Shared primitives
+   =================================================================== */
+.rule { height: 1px; background: var(--rule); margin: 0; }
+.rule--mb { margin-bottom: 32px; }
+
+.article-row {
+  padding: 56px 120px;
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 0 48px;
+  border-bottom: 1px solid var(--rule);
+}
+.article-row--wide { grid-template-columns: 80px 1fr 1fr; }
+.article-row--tint { background: var(--tint); }
+.article-row--last { border-bottom: none; }
+
+.article-marker {
+  font-family: 'Courier Prime', monospace;
+  font-size: 10px;
+  color: var(--red);
+  text-align: right;
+  padding-top: 6px;
+  letter-spacing: 0.1em;
+}
+
+.article-eyebrow {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--ink-faded);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.article-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 700;
+  line-height: 1.05;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0 0 18px;
+}
+
+.stamp {
+  --r: -6deg;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--red);
+  color: var(--red);
+  font-family: 'Courier Prime', monospace;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  transform: rotate(var(--r));
+  opacity: 0;
+  box-shadow: inset 0 0 0 1px rgba(184, 28, 16, 0.2);
+  user-select: none;
+}
+.stamp.is-visible {
+  animation: stamp 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+/* ===================================================================
+   Splash
+   =================================================================== */
+.splash {
+  position: relative;
+  height: 100vh;
+  min-height: 600px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  background: var(--paper);
+  border-bottom: 2px solid var(--ink);
+}
+
+.splash-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px 64px 80px 80px;
+  border-right: 1px solid var(--rule);
+  background-image: repeating-linear-gradient(transparent, transparent 27px, var(--ink-ghost) 27px, var(--ink-ghost) 28px);
+}
+
+.splash-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 68px; width: 1px;
+  background: rgba(184, 28, 16, 0.3);
+}
+
+
+.splash-meta {
+  position: absolute; top: 28px; left: 88px;
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  color: var(--ink-faded); letter-spacing: 0.16em;
+  text-transform: uppercase; line-height: 1.9;
+  opacity: 0; transition: opacity 0.5s ease;
+}
+
+.splash-brand {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.splash-brand__label {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  letter-spacing: 0.38em; color: var(--ink-faded);
+  text-transform: uppercase; margin-bottom: 14px;
+}
+
+.splash-brand__name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(52px, 7vw, 96px);
+  font-weight: 900; line-height: 0.9; margin: 0;
+  letter-spacing: -0.025em; color: var(--ink);
+}
+
+.splash-brand__divider {
+  height: 1px; background: var(--ink); margin: 28px 0;
+  opacity: 0.15; max-width: 320px;
+}
+
+.splash-brand__pills {
+  display: flex; gap: 20px; align-items: center;
+  opacity: 0; transition: opacity 0.5s ease;
+}
+.splash-brand__pill {
+  display: flex; align-items: center; gap: 20px;
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  letter-spacing: 0.2em; color: var(--ink-faded); text-transform: uppercase;
+}
+.splash-brand__pill::after {
+  content: ''; width: 3px; height: 3px; background: var(--red);
+  border-radius: 50%; display: inline-block;
+}
+.splash-brand__pill:last-child::after { display: none; }
+
+.splash-quote {
+  position: absolute; bottom: 60px; left: 88px;
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--ink-faded); font-style: italic; line-height: 2;
+  max-width: 240px;
+  opacity: 0; transition: opacity 0.5s ease 0.2s;
+}
+
+.splash-scrollhint {
+  position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  opacity: 0; transition: opacity 0.5s ease 0.4s;
+}
+.splash-scrollhint__label {
+  font-family: 'Courier Prime', monospace; font-size: 9px;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-faded);
+}
+.splash-scrollhint__bar {
+  width: 1px; height: 24px; background: var(--ink-faded);
+  animation: scrollBounce 1.6s ease-in-out infinite;
+}
+
+.splash-stage {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tint);
+  background-image: repeating-linear-gradient(transparent, transparent 27px, var(--ink-ghost) 27px, var(--ink-ghost) 28px);
+  overflow: hidden;
+  opacity: 0; transition: opacity 0.8s ease 0.3s;
+}
+
+/* phase reveal states, toggled via JS by adding "is-phase-1/2/3" to .splash */
+.splash.is-phase-1 .splash-topbar { opacity: 1; }
+.splash.is-phase-2 .splash-brand,
+.splash.is-phase-2 .splash-stage { opacity: 1; transform: translateY(0); }
+.splash.is-phase-3 .splash-meta,
+.splash.is-phase-3 .splash-brand__pills,
+.splash.is-phase-3 .splash-quote,
+.splash.is-phase-3 .splash-scrollhint { opacity: 1; }
+
+/* ===================================================================
+   Filing header
+   =================================================================== */
+.filing-header {
+  padding: 36px 120px 32px;
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: 0 48px;
+  align-items: center;
+  border-bottom: 2px solid var(--ink);
+}
+.filing-header__title {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px; font-weight: 700; color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.filing-header__title em {
+  font-style: italic; font-weight: 400; font-size: 0.7em;
+  color: var(--ink-faded); margin-left: 12px;
+}
+.filing-header__meta {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  color: var(--ink-faded); letter-spacing: 0.14em;
+  text-transform: uppercase; margin-top: 4px;
+}
+.filing-header__right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+.filing-header__hash {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  color: var(--ink-faded); text-align: right;
+}
+.hash { color: var(--red); }
+
+/* ===================================================================
+   Preamble
+   =================================================================== */
+.preamble {
+  padding: 56px 120px;
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr;
+  gap: 0 48px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+.preamble__label {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  color: var(--red); text-align: right; padding-top: 4px; letter-spacing: 0.1em;
+}
+.preamble__text {
+  font-family: 'Courier Prime', monospace; font-size: 14px;
+  line-height: 1.95; color: var(--ink); white-space: pre-wrap;
+}
+.preamble__text p { margin: 0 0 16px; }
+.preamble__cursor {
+  animation: cursorBlink 1s infinite; display: inline-block;
+}
+.preamble__sidebar {
+  border-left: 2px solid var(--ink-ghost); padding-left: 24px;
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--ink-faded); line-height: 1.8; font-style: italic;
+}
+.preamble__sidebar strong {
+  font-style: normal; display: block; margin-bottom: 8px;
+  letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px;
+}
+
+/* ===================================================================
+   Article I — clauses accordion
+   =================================================================== */
+.clause-list { display: flex; flex-direction: column; gap: 2px; }
+.clause {
+  padding: 20px 24px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.clause.is-open {
+  background: var(--tint-strong);
+  border-color: var(--rule);
+}
+.clause__row { display: flex; gap: 20px; align-items: flex-start; }
+.clause__num {
+  font-family: 'Courier Prime', monospace; font-size: 12px;
+  color: var(--red); font-weight: 700; flex-shrink: 0;
+  padding-top: 2px; min-width: 32px;
+}
+.clause__body-wrap { flex: 1; }
+.clause__head {
+  font-family: 'Playfair Display', serif; font-size: 17px;
+  font-weight: 600; color: var(--ink); margin-bottom: 0;
+}
+.clause.is-open .clause__head { margin-bottom: 12px; }
+.clause__body {
+  font-family: 'Courier Prime', monospace; font-size: 13px;
+  line-height: 1.85; color: var(--ink-faded);
+  display: none;
+  animation: typeIn 0.3s ease;
+}
+.clause.is-open .clause__body { display: block; }
+.clause__chevron {
+  font-family: 'Courier Prime', monospace; font-size: 16px;
+  color: var(--ink-faded); flex-shrink: 0; transition: transform 0.2s;
+}
+.clause.is-open .clause__chevron { transform: rotate(90deg); }
+
+/* ===================================================================
+   Article II — guarantees grid
+   =================================================================== */
+.guarantees {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+}
+.guarantee {
+  padding: 24px 28px;
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.guarantee:nth-child(2n) { border-right: none; }
+.guarantee:nth-last-child(-n+2) { border-bottom: none; }
+.guarantee__num {
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--red); font-weight: 700; margin-bottom: 8px; letter-spacing: 0.06em;
+}
+.guarantee__head {
+  font-family: 'Playfair Display', serif; font-size: 15px;
+  font-weight: 700; margin-bottom: 10px; color: var(--ink); line-height: 1.2;
+}
+.guarantee__body {
+  font-family: 'Courier Prime', monospace; font-size: 12px;
+  line-height: 1.85; color: var(--ink-faded);
+}
+
+/* ===================================================================
+   Article III — pricing
+   =================================================================== */
+.pricing-head {
+  display: flex; justify-content: space-between; align-items: flex-end;
+}
+.billing-toggle { display: flex; border: 1px solid var(--rule); margin-bottom: 18px; }
+.billing-toggle button {
+  padding: 8px 20px;
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  border: none; background: transparent; color: var(--ink-faded);
+  cursor: pointer; transition: all 0.2s;
+}
+.billing-toggle button.is-active { background: var(--ink); color: var(--paper); }
+
+.plans {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+  border: 1px solid var(--rule);
+}
+.plan {
+  padding: 32px 28px;
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.plan:last-child { border-right: none; }
+.plan--featured { background: var(--tint-strong); }
+.plan--featured::before {
+  content: ''; position: absolute; top: -1px; left: 0; right: 0; height: 2px;
+  background: var(--red);
+}
+.plan__clause {
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--red); font-weight: 700; margin-bottom: 6px; letter-spacing: 0.08em;
+}
+.plan__name {
+  font-family: 'Playfair Display', serif; font-size: 18px;
+  font-weight: 700; margin-bottom: 4px; color: var(--ink);
+}
+.plan__desc {
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--ink-faded); margin-bottom: 20px; line-height: 1.6;
+}
+.plan__price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 24px; }
+.plan__price-amount {
+  font-family: 'Playfair Display', serif; font-size: 44px;
+  font-weight: 900; line-height: 1; color: var(--ink);
+}
+.plan__price-unit { font-family: 'Courier Prime', monospace; font-size: 11px; color: var(--ink-faded); }
+.plan__terms { flex: 1; display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+.plan__term { display: flex; gap: 10px; }
+.plan__term-check { color: var(--red); flex-shrink: 0; font-size: 12px; }
+.plan__term-text {
+  font-family: 'Courier Prime', monospace; font-size: 12px;
+  line-height: 1.5; color: var(--ink-faded);
+}
+.plan__cta {
+  padding: 12px; border: 1px solid var(--rule);
+  background: transparent; color: var(--ink);
+  font-family: 'Courier Prime', monospace; font-size: 12px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  cursor: pointer; transition: all 0.2s;
+}
+.plan__cta:hover { background: var(--ink); color: var(--paper); }
+.plan--featured .plan__cta { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+
+/* ===================================================================
+   Article IV — record / testimonials
+   =================================================================== */
+.record { display: flex; flex-direction: column; border: 1px solid var(--rule); }
+.record-item {
+  padding: 28px 32px;
+  border-bottom: 1px solid var(--rule);
+  display: grid; grid-template-columns: 160px 1fr; gap: 32px;
+}
+.record-item:last-child { border-bottom: none; }
+.record-item__id {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  color: var(--red); letter-spacing: 0.1em; margin-bottom: 6px;
+}
+.record-item__date {
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  color: var(--ink-faded); margin-bottom: 12px;
+}
+.record-item__outcome {
+  display: inline-block; border: 1px solid var(--red); color: var(--red);
+  font-family: 'Courier Prime', monospace; font-size: 9px;
+  padding: 3px 8px; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.record-item__party {
+  font-family: 'Courier Prime', monospace; font-size: 11px;
+  font-weight: 700; color: var(--ink); margin-bottom: 10px; letter-spacing: 0.05em;
+}
+.record-item__statement {
+  font-family: 'Courier Prime', monospace; font-size: 13px;
+  line-height: 1.9; color: var(--ink-faded); font-style: italic; margin: 0;
+}
+
+/* ===================================================================
+   Execution block
+   =================================================================== */
+.execution-blurb {
+  font-family: 'Courier Prime', monospace; font-size: 13px;
+  line-height: 1.9; color: var(--ink-faded);
+  max-width: 540px; margin-bottom: 40px;
+}
+.sign-form {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+  max-width: 640px; margin-bottom: 32px;
+}
+.sign-form__field { display: flex; flex-direction: column; }
+.sign-form__label {
+  font-family: 'Courier Prime', monospace; font-size: 10px;
+  letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-faded);
+  margin-bottom: 8px;
+}
+.sign-form__input {
+  width: 100%; padding: 10px 12px;
+  font-family: 'Courier Prime', monospace; font-size: 13px;
+  border: none; border-bottom: 2px solid var(--ink);
+  background: transparent; color: var(--ink); outline: none;
+}
+.sign-form__actions { grid-column: 1 / 3; display: flex; gap: 16px; align-items: center; }
+.sign-form__submit {
+  padding: 14px 36px; background: var(--ink); color: var(--paper);
+  border: none; font-family: 'Courier Prime', monospace; font-size: 12px;
+  letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer;
+  transition: all 0.2s;
+}
+.sign-form__submit[disabled] { opacity: 0.4; cursor: not-allowed; }
+.sign-form__hint { font-family: 'Courier Prime', monospace; font-size: 11px; color: var(--ink-faded); }
+
+.executed-card {
+  display: none;
+  align-items: flex-start; gap: 40px; padding: 32px;
+  background: var(--red-light); border: 1px solid rgba(184, 28, 16, 0.2);
+  max-width: 640px; animation: typeIn 0.4s ease;
+}
+.executed-card.is-visible { display: flex; }
+.executed-card__name {
+  font-family: 'Playfair Display', serif; font-style: italic;
+  font-size: 22px; color: var(--ink); margin-bottom: 8px;
+}
+.executed-card__meta {
+  font-family: 'Courier Prime', monospace; font-size: 11px; color: var(--ink-faded);
+  border-top: 1px solid var(--rule); padding-top: 8px; margin-top: 4px;
+}
+
+.footer-row {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 16px;
+}
+.footer-legal { font-family: 'Courier Prime', monospace; font-size: 11px; color: var(--ink-faded); line-height: 1.8; }
+.footer-links { display: flex; gap: 28px; flex-wrap: wrap; }
+.footer-links a {
+  font-family: 'Courier Prime', monospace; font-size: 11px; color: var(--ink-faded);
+  text-decoration: none; letter-spacing: 0.08em; text-transform: uppercase;
+  transition: color 0.2s;
+}
+.footer-links a:hover { color: var(--red); }
+
+/* ===================================================================
+   Contract mini-animation (ported from ContractAnimation.tsx)
+   =================================================================== */
+#ca-viewport {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#ca-stage {
+  position: relative; width: 320px; height: 560px; overflow: hidden;
+  background: #f4f3ef;
+  transform-origin: center center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.dark #ca-stage { background: #1e1b14; border-color: rgba(232, 224, 204, 0.1); }
+#ca-camera {
+  position: absolute; top: 0; left: 0; width: 320px; height: 560px;
+  transform-origin: 0 0; transition: transform 1.3s cubic-bezier(.65,0,.35,1);
+}
+#ca-startScreen {
+  position: absolute; top: 0; left: 0; width: 320px; height: 560px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .6s ease;
+}
+#ca-makeBtn {
+  font-family: 'Courier Prime', monospace; font-size: 13px; padding: 10px 18px;
+  border: 1px solid rgba(26, 24, 16, 0.25); background: #fff; color: #1a1810;
+  cursor: pointer; letter-spacing: 0.04em;
+}
+.dark #ca-makeBtn { background: #2a2620; color: #e8e0cc; border-color: rgba(232, 224, 204, 0.2); }
+#ca-doc {
+  position: absolute; top: 40px; left: 20px; width: 280px; min-height: 420px;
+  background: #ffffff; border: 1px solid #e2e0d8; padding: 20px 22px;
+  opacity: 0; transition: transform .9s cubic-bezier(.5,0,.75,0), opacity .9s ease;
+}
+.dark #ca-doc { background: #252018; border-color: rgba(232, 224, 204, 0.12); }
+#ca-docTitle { font-family: 'Playfair Display', serif; font-size: 14px; font-weight: 700; color: #1a1810; min-height: 20px; }
+.dark #ca-docTitle { color: #e8e0cc; }
+.ca-divider { height: 1px; background: rgba(26, 24, 16, 0.15); margin: 10px 0 14px; }
+.dark .ca-divider { background: rgba(232, 224, 204, 0.12); }
+.ca-clause { font-family: 'Courier Prime', monospace; font-size: 11px; line-height: 1.7; color: #1a1810; min-height: 16px; margin-top: 8px; }
+.dark .ca-clause { color: #e8e0cc; }
+#ca-suggestionBox {
+  margin-top: 10px; padding: 8px 10px; background: rgba(184, 28, 16, 0.06);
+  border: 1px solid rgba(184, 28, 16, 0.3); font-size: 11px; color: #b81c10;
+  display: none; font-family: 'Courier Prime', monospace;
+}
+#ca-sigBlock { display: flex; flex-direction: column; gap: 16px; }
+.ca-sigLabel { font-family: 'Courier Prime', monospace; font-size: 9px; color: #8a887f; margin-bottom: 4px; letter-spacing: 0.1em; text-transform: uppercase; }
+.ca-sigLine { height: 26px; border-bottom: 1px solid rgba(26, 24, 16, 0.3); font-family: 'Playfair Display', serif; font-style: italic; font-size: 15px; color: #1a1810; }
+.dark .ca-sigLine { border-color: rgba(232, 224, 204, 0.25); color: #e8e0cc; }
+#ca-printRow { margin-top: 22px; text-align: center; opacity: 0; transition: opacity 0.4s ease; }
+#ca-printBtn {
+  font-family: 'Courier Prime', monospace; font-size: 12px; padding: 9px 20px;
+  border: 1px solid rgba(26, 24, 16, 0.3); background: #1a1810; color: #f4efe3;
+  cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.dark #ca-printBtn { background: #e8e0cc; color: #1a1810; }
+#ca-lockBadge {
+  margin-top: 14px; display: none; align-items: center; justify-content: center; gap: 6px;
+  font-family: 'Courier Prime', monospace; font-size: 11px; color: #2f7d4f; letter-spacing: 0.08em;
+}
+#ca-makeBtn,
+#ca-printBtn {
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.ca-btn-press {
+  transform: scale(0.92);
+  filter: brightness(0.9);
+}
+
+/* ===================================================================
+   Scrollbar + responsive
+   =================================================================== */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--paper-dark); }
+::-webkit-scrollbar-thumb { background: var(--ink-faded); }
+
+@media (max-width: 900px) {
+  .splash { grid-template-columns: 1fr; height: auto; }
+  .splash-panel { border-right: none; border-bottom: 1px solid var(--rule); padding: 56px 32px; }
+  .splash-stage { padding: 40px 0; }
+  .article-row, .article-row--wide, .preamble, .filing-header {
+    grid-template-columns: 1fr; padding: 40px 24px; gap: 16px 0;
+  }
+  .article-marker, .preamble__label { text-align: left; }
+  .guarantees, .plans { grid-template-columns: 1fr; }
+  .guarantee { border-right: none !important; }
+  .plan { border-right: none !important; border-bottom: 1px solid var(--rule); }
+  .sign-form { grid-template-columns: 1fr; }
+  .sign-form__actions { grid-column: 1; }
+  .record-item { grid-template-columns: 1fr; }
+}
