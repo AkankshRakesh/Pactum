@@ -190,15 +190,7 @@ a { color: inherit; }
   flex-direction: column;
   justify-content: center;
   padding: 80px 64px 80px 80px;
-  border-right: 1px solid var(--rule);
   background-image: repeating-linear-gradient(transparent, transparent 27px, var(--ink-ghost) 27px, var(--ink-ghost) 28px);
-}
-
-.splash-panel::before {
-  content: '';
-  position: absolute;
-  top: 0; bottom: 0; left: 68px; width: 1px;
-  background: rgba(184, 28, 16, 0.3);
 }
 
 
@@ -667,17 +659,41 @@ a { color: inherit; }
 ::-webkit-scrollbar-thumb { background: var(--ink-faded); }
 
 @media (max-width: 900px) {
-  .splash { grid-template-columns: 1fr; height: auto; }
-  .splash-panel { border-right: none; border-bottom: 1px solid var(--rule); padding: 56px 32px; }
-  .splash-stage { padding: 40px 0; }
-  .article-row, .article-row--wide, .preamble, .filing-header {
-    grid-template-columns: 1fr; padding: 40px 24px; gap: 16px 0;
+  .splash {
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+    position: relative;
   }
-  .article-marker, .preamble__label { text-align: left; }
-  .guarantees, .plans { grid-template-columns: 1fr; }
-  .guarantee { border-right: none !important; }
-  .plan { border-right: none !important; border-bottom: 1px solid var(--rule); }
-  .sign-form { grid-template-columns: 1fr; }
-  .sign-form__actions { grid-column: 1; }
-  .record-item { grid-template-columns: 1fr; }
+
+  .splash-stage {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    z-index: 1;
+  }
+
+  .splash-panel {
+    position: relative;
+    z-index: 2;
+    border-right: none;
+    border-bottom: none;
+    min-height: 100vh;
+    padding: 100px 32px 48px;
+    background: rgba(244, 239, 227, 0.838);
+  }
+  .dark .splash-panel {
+    background: rgba(21, 18, 16, 0.85);
+  }
+
+  .splash-meta { left: 32px; }
+  .splash-panel::before { left: 20px; }
+}
+
+@media (max-width: 520px) {
+  .splash-panel { padding: 90px 20px 40px; }
+  .splash-brand__name { font-size: clamp(36px, 12vw, 52px); }
+  .splash-brand__pills { gap: 14px; margin-bottom: 28px; }
+  .splash-cta { width: 100%; justify-content: center; padding: 14px 24px; }
+  #ca-stage, #ca-camera, #ca-startScreen { width: 280px; height: 490px; }
+  #ca-doc { width: 240px; left: 20px; }
 }
