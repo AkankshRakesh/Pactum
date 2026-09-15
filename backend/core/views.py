@@ -1,3 +1,4 @@
+from django.http import JsonResponse
 from django.shortcuts import render
 
 
@@ -155,3 +156,16 @@ def home(request):
         "record": RECORD,
     }
     return render(request, "core/home.html", context)
+
+
+def home_data(request):
+    if request.method != "GET":
+        return JsonResponse({"detail": "Method not allowed"}, status=405)
+
+    return JsonResponse({
+        "preamble": PREAMBLE_TEXT.split("\n\n"),
+        "clauses": CLAUSES,
+        "guarantees": GUARANTEES,
+        "plans": PLANS,
+        "record": RECORD,
+    })
