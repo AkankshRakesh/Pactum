@@ -1,5 +1,13 @@
+import json
+
+from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_GET, require_POST
 
 
 CLAUSES = [
@@ -169,3 +177,108 @@ def home_data(request):
         "plans": PLANS,
         "record": RECORD,
     })
+
+
+User = get_user_model()
+
+
+def _user_data(user):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+    }
+
+
+def _json_body(request):
+    try:
+        body = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return None, JsonResponse({"detail": "Request body must be valid JSON."}, status=400)
+
+    if not isinstance(body, dict):
+        return None, JsonResponse({"detail": "Request body must be a JSON object."}, status=400)
+
+    return body, None
+
+
+@require_GET
+@ensure_csrf_cookie
+def csrf_token(request):
+    return JsonResponse({"csrfToken": get_token(request)})
+
+
+@require_POST
+def signup(request):
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    username = str(data.get("username", "")).strip()
+    email = str(data.get("email", "")).strip().lower()
+    password = data.get("password", "")
+    password_confirmation = data.get("passwordConfirm", data.get("password_confirm"))
+
+    errors = {}
+    if not username:
+        errors["username"] = "Username is required."
+    if not email:
+        errors["email"] = "Email is required."
+    if not isinstance(password, str) or not password:
+        errors["password"] = "Password is required."
+    elif password_confirmation is not None and password != password_confirmation:
+        errors["passwordConfirm"] = "Passwords do not match."
+
+    if username and User.objects.filter(username__iexact=username).exists():
+        errors["username"] = "That username is already in use."
+    if email and User.objects.filter(email__iexact=email).exists():
+        errors["email"] = "That email is already in use."
+
+    if password and not errors.get("password"):
+        try:
+            validate_password(password)
+        except ValidationError as validation_error:
+            errors["password"] = list(validation_error.messages)
+
+    if errors:
+        return JsonResponse({"errors": errors}, status=400)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    login(request, user)
+    return JsonResponse({"user": _user_data(user)}, status=201)
+
+
+@require_POST
+def login_view(request):
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    identifier = str(data.get("identifier", data.get("username", ""))).strip()
+    password = data.get("password", "")
+    username = identifier
+
+    if "@" in identifier:
+        matching_user = User.objects.filter(email__iexact=identifier).first()
+        username = matching_user.username if matching_user else identifier
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return JsonResponse({"detail": "Invalid username/email or password."}, status=401)
+
+    login(request, user)
+    return JsonResponse({"user": _user_data(user)})
+
+
+@require_POST
+def logout_view(request):
+    logout(request)
+    return JsonResponse({"detail": "Logged out."})
+
+
+@require_GET
+def current_user(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
+
+    return JsonResponse({"user": _user_data(request.user)})
