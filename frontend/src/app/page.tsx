@@ -46,9 +46,6 @@ export default function Home() {
    */
   useEffect(() => {
     const stage = document.getElementById("ca-stage");
-
-    if (!stage) return;
-
     const camera = document.getElementById("ca-camera");
     const doc = document.getElementById("ca-doc");
     const startScreen = document.getElementById("ca-startScreen");
@@ -65,8 +62,10 @@ export default function Home() {
     const sigBlock = document.getElementById("ca-sigBlock");
     const sig1 = document.getElementById("ca-sig1");
     const sig2 = document.getElementById("ca-sig2");
+    const viewport = document.getElementById("ca-viewport");
 
     if (
+      !stage ||
       !camera ||
       !doc ||
       !startScreen ||
@@ -82,12 +81,34 @@ export default function Home() {
       !suggestionText ||
       !sigBlock ||
       !sig1 ||
-      !sig2
+      !sig2 ||
+      !viewport
     ) {
       return;
     }
 
-    const viewport = document.getElementById("ca-viewport");
+    // Rebind as non-null HTMLElement so TypeScript keeps the narrowing
+    // inside the deeply nested closures below (flow analysis from the
+    // guard above does not survive across nested function boundaries
+    // for the original `const`s pulled from getElementById).
+    const stageEl: HTMLElement = stage;
+    const cameraEl: HTMLElement = camera;
+    const docEl: HTMLElement = doc;
+    const startScreenEl: HTMLElement = startScreen;
+    const makeBtnEl: HTMLElement = makeBtn;
+    const printBtnEl: HTMLElement = printBtn;
+    const printRowEl: HTMLElement = printRow;
+    const lockBadgeEl: HTMLElement = lockBadge;
+    const docTitleEl: HTMLElement = docTitle;
+    const clause1El: HTMLElement = clause1;
+    const clause2El: HTMLElement = clause2;
+    const clause3El: HTMLElement = clause3;
+    const suggestionBoxEl: HTMLElement = suggestionBox;
+    const suggestionTextEl: HTMLElement = suggestionText;
+    const sigBlockEl: HTMLElement = sigBlock;
+    const sig1El: HTMLElement = sig1;
+    const sig2El: HTMLElement = sig2;
+    const viewportEl: HTMLElement = viewport;
 
     let loopTimer: number | undefined;
     let cancelled = false;
@@ -98,17 +119,15 @@ export default function Home() {
      * -------------------------------------------------------------
      */
     function fitStage() {
-      if (!viewport) return;
-
-      const availW = viewport.clientWidth;
-      const availH = viewport.clientHeight;
+      const availW = viewportEl.clientWidth;
+      const availH = viewportEl.clientHeight;
 
       const scale = Math.max(
         0.1,
         Math.max(availW / VIEW_W, availH / VIEW_H)
       );
 
-      stage.style.transform = `scale(${scale})`;
+      stageEl.style.transform = `scale(${scale})`;
     }
 
     fitStage();
@@ -212,7 +231,7 @@ export default function Home() {
       y: number,
       cb?: () => void
     ) {
-      camera.style.transform = `scale(${scale}) translate(${x}px, ${y}px)`;
+      cameraEl.style.transform = `scale(${scale}) translate(${x}px, ${y}px)`;
 
       if (cb) {
         window.setTimeout(cb, 1350);
@@ -245,28 +264,28 @@ export default function Home() {
      * -------------------------------------------------------------
      */
     function resetStage() {
-      doc.style.transition = "none";
-      doc.style.transform = "translateY(0)";
-      doc.style.opacity = "0";
+      docEl.style.transition = "none";
+      docEl.style.transform = "translateY(0)";
+      docEl.style.opacity = "0";
 
-      startScreen.style.opacity = "0";
-      startScreen.style.display = "flex";
+      startScreenEl.style.opacity = "0";
+      startScreenEl.style.display = "flex";
 
-      docTitle.textContent = "";
-      clause1.textContent = "";
-      clause2.textContent = "";
-      clause3.textContent = "";
-      sig1.textContent = "";
-      sig2.textContent = "";
+      docTitleEl.textContent = "";
+      clause1El.textContent = "";
+      clause2El.textContent = "";
+      clause3El.textContent = "";
+      sig1El.textContent = "";
+      sig2El.textContent = "";
 
       [
-        docTitle,
-        clause1,
-        clause2,
-        clause3,
-        sig1,
-        sig2,
-        suggestionBox,
+        docTitleEl,
+        clause1El,
+        clause2El,
+        clause3El,
+        sig1El,
+        sig2El,
+        suggestionBoxEl,
       ].forEach((el) => {
         el.classList.remove(
           "ca-field-active",
@@ -275,18 +294,18 @@ export default function Home() {
         );
       });
 
-      suggestionBox.style.display = "none";
-      printRow.style.opacity = "0";
-      lockBadge.style.display = "none";
+      suggestionBoxEl.style.display = "none";
+      printRowEl.style.opacity = "0";
+      lockBadgeEl.style.display = "none";
 
       setCam(1, 0, 0);
 
       /*
        * Force reflow so removing the transition takes effect.
        */
-      void doc.offsetWidth;
+      void docEl.offsetWidth;
 
-      doc.style.transition =
+      docEl.style.transition =
         "transform .9s cubic-bezier(.5,0,.75,0), opacity .9s ease";
     }
 
@@ -303,102 +322,102 @@ export default function Home() {
       loopTimer = window.setTimeout(() => {
         if (cancelled) return;
 
-        startScreen.style.opacity = "1";
+        startScreenEl.style.opacity = "1";
 
         window.setTimeout(() => {
           if (cancelled) return;
 
-          pressButton(makeBtn, () => {
-            startScreen.style.opacity = "0";
-            doc.style.opacity = "1";
+          pressButton(makeBtnEl, () => {
+            startScreenEl.style.opacity = "0";
+            docEl.style.opacity = "1";
 
-            focusOnEl(clause2, 1.15, () => {
+            focusOnEl(clause2El, 1.15, () => {
               typeIntoHighlighted(
-                docTitle,
+                docTitleEl,
                 "Service agreement",
                 40,
                 "ca-actor-you",
                 () => {
                   typeIntoHighlighted(
-                    clause1,
+                    clause1El,
                     "1. Scope: design and delivery of product.",
                     16,
                     "ca-actor-you",
                     () => {
                       typeIntoHighlighted(
-                        clause2,
+                        clause2El,
                         "2. Payment: due within 30 days.",
                         16,
                         "ca-actor-you",
                         () => {
                           focusFull(() => {
-                            suggestionBox.style.display = "block";
+                            suggestionBoxEl.style.display = "block";
 
                             focusOnEl(
-                              suggestionBox,
+                              suggestionBoxEl,
                               1.2,
                               () => {
                                 typeIntoHighlighted(
-                                  suggestionText,
+                                  suggestionTextEl,
                                   "Suggestion: change to 15 days.",
                                   14,
                                   "ca-actor-alex",
                                   () => {
                                     window.setTimeout(() => {
-                                      clause2.textContent =
+                                      clause2El.textContent =
                                         "2. Payment: due within 15 days.";
 
-                                      suggestionBox.style.display = "none";
+                                      suggestionBoxEl.style.display = "none";
 
                                       focusOnEl(
-                                        clause3,
+                                        clause3El,
                                         1.15,
                                         () => {
                                           typeIntoHighlighted(
-                                            clause3,
+                                            clause3El,
                                             "3. Termination: 14 days notice.",
                                             16,
                                             "ca-actor-you",
                                             () => {
                                               focusOnEl(
-                                                sigBlock,
+                                                sigBlockEl,
                                                 1.15,
                                                 () => {
                                                   typeIntoHighlighted(
-                                                    sig1,
+                                                    sig1El,
                                                     "Yabadabadoo",
                                                     55,
                                                     "ca-actor-you",
                                                     () => {
                                                       typeIntoHighlighted(
-                                                        sig2,
+                                                        sig2El,
                                                         "Akanksh R.",
                                                         55,
                                                         "ca-actor-alex",
                                                         () => {
-                                                          printRow.style.opacity =
+                                                          printRowEl.style.opacity =
                                                             "1";
 
                                                           focusOnEl(
-                                                            printRow,
+                                                            printRowEl,
                                                             1.2,
                                                             () => {
                                                               pressButton(
-                                                                printBtn,
+                                                                printBtnEl,
                                                                 () => {
-                                                                  lockBadge.style.display =
+                                                                  lockBadgeEl.style.display =
                                                                     "flex";
 
                                                                   focusFull(
                                                                     () => {
                                                                       window.setTimeout(
                                                                         () => {
-                                                                          doc.style.transform =
+                                                                          docEl.style.transform =
                                                                             "translateY(-620px)";
-                                                                          doc.style.opacity =
+                                                                          docEl.style.opacity =
                                                                             "0";
 
-                                                                          startScreen.style.opacity =
+                                                                          startScreenEl.style.opacity =
                                                                             "1";
 
                                                                           loopTimer =
@@ -452,20 +471,20 @@ export default function Home() {
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      docTitle.textContent = "Service agreement";
-      clause1.textContent =
+      docTitleEl.textContent = "Service agreement";
+      clause1El.textContent =
         "1. Scope: design and delivery of product.";
-      clause2.textContent =
+      clause2El.textContent =
         "2. Payment: due within 15 days.";
-      clause3.textContent =
+      clause3El.textContent =
         "3. Termination: 14 days notice.";
-      sig1.textContent = "Yabadabadoo";
-      sig2.textContent = "Akanksh R.";
+      sig1El.textContent = "Yabadabadoo";
+      sig2El.textContent = "Akanksh R.";
 
-      doc.style.opacity = "1";
-      startScreen.style.opacity = "0";
-      printRow.style.opacity = "1";
-      lockBadge.style.display = "flex";
+      docEl.style.opacity = "1";
+      startScreenEl.style.opacity = "0";
+      printRowEl.style.opacity = "1";
+      lockBadgeEl.style.display = "flex";
     } else {
       runLoop();
     }
@@ -526,7 +545,7 @@ export default function Home() {
                 ))}
               </div>
 
-              <a href="#contract" className={styles.splashCta}>
+              <a href="/dashboard" className={styles.splashCta}>
                 Get started →
               </a>
             </div>
