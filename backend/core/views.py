@@ -12,7 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 CLAUSES = [
     {
-        "num": "1.1",
+        "num": "1.1",  
         "head": "Formation of Agreement",
         "body": "Either party may initiate a contract using BindPact's structured template "
                  "engine or custom clause builder. The initiating party (\u201cDrafter\u201d) "
