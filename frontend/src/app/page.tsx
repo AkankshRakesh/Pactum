@@ -9,6 +9,12 @@ const VIEW_H = 560;
 
 export default function Home() {
   const [dark, setDark] = useState(false);
+  const [stageReady, setStageReady] = useState(false);
+
+  useEffect(() => {
+    const readyTimer = window.setTimeout(() => setStageReady(true), 50);
+    return () => window.clearTimeout(readyTimer);
+  }, []);
 
   useEffect(() => {
     const themeTimer = window.setTimeout(() => {
@@ -551,72 +557,88 @@ export default function Home() {
             </div>
           </div>
 
-          <div id="ca-viewport">
-            <div id="ca-stage">
-              <div id="ca-camera">
-                <div id="ca-startScreen">
-                  <button id="ca-makeBtn" type="button">
+          <div
+            id="ca-viewport"
+            className={`${styles.splashStage} ${styles.caViewport} ${
+              stageReady ? styles.splashReady : ""
+            }`}
+          >
+            <div id="ca-stage" className={styles.caStage}>
+              <div id="ca-camera" className={styles.caCamera}>
+                <div id="ca-startScreen" className={styles.caStartScreen}>
+                  <button
+                    id="ca-makeBtn"
+                    type="button"
+                    className={styles.caMakeBtn}
+                  >
                     <span>＋</span> Make contract
                   </button>
                 </div>
 
-                <div id="ca-doc">
-                  <div id="ca-docTitle"></div>
+                <div id="ca-doc" className={styles.caDoc}>
+                  <div id="ca-docTitle" className={styles.caDocTitle}></div>
 
-                  <div className="ca-divider"></div>
+                  <div className={styles.caDivider}></div>
 
                   <div
                     id="ca-clause1"
-                    className="ca-clause"
+                    className={styles.caClause}
                   ></div>
 
                   <div
                     id="ca-clause2"
-                    className="ca-clause"
+                    className={styles.caClause}
                   ></div>
 
-                  <div id="ca-suggestionBox">
+                  <div
+                    id="ca-suggestionBox"
+                    className={styles.caSuggestionBox}
+                  >
                     <span id="ca-suggestionText"></span>
                   </div>
 
                   <div
                     id="ca-clause3"
-                    className="ca-clause"
+                    className={styles.caClause}
                   ></div>
 
-                  <div className="ca-divider"></div>
+                  <div className={styles.caDivider}></div>
 
-                  <div id="ca-sigBlock">
+                  <div id="ca-sigBlock" className={styles.caSigBlock}>
                     <div>
-                      <div className="ca-sigLabel">
+                      <div className={styles.caSigLabel}>
                         Signed by You
                       </div>
 
                       <div
                         id="ca-sig1"
-                        className="ca-sigLine"
+                        className={styles.caSigLine}
                       ></div>
                     </div>
 
                     <div>
-                      <div className="ca-sigLabel">
+                      <div className={styles.caSigLabel}>
                         Signed by Akanksh R.
                       </div>
 
                       <div
                         id="ca-sig2"
-                        className="ca-sigLine"
+                        className={styles.caSigLine}
                       ></div>
                     </div>
                   </div>
 
-                  <div id="ca-printRow">
-                    <button id="ca-printBtn" type="button">
+                  <div id="ca-printRow" className={styles.caPrintRow}>
+                    <button
+                      id="ca-printBtn"
+                      type="button"
+                      className={styles.caPrintBtn}
+                    >
                       Seal contract
                     </button>
                   </div>
 
-                  <div id="ca-lockBadge">
+                  <div id="ca-lockBadge" className={styles.caLockBadge}>
                     <span>✓ Contract sealed</span>
                   </div>
                 </div>
