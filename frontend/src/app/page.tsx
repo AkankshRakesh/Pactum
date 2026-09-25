@@ -8,7 +8,6 @@ const VIEW_W = 320;
 const VIEW_H = 560;
 
 export default function Home() {
-  const [dark, setDark] = useState(false);
   const [stageReady, setStageReady] = useState(false);
 
   useEffect(() => {
@@ -17,10 +16,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const themeTimer = window.setTimeout(() => {
-      setDark(window.localStorage.getItem("pactum-theme") === "dark");
-    }, 0);
-
     const phases = [
       window.setTimeout(
         () => document.getElementById("splash")?.classList.add("is-phase-1"),
@@ -37,15 +32,9 @@ export default function Home() {
     ];
 
     return () => {
-      window.clearTimeout(themeTimer);
       phases.forEach(window.clearTimeout);
     };
   }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    window.localStorage.setItem("pactum-theme", dark ? "dark" : "light");
-  }, [dark]);
 
   /*
    * Contract animation
@@ -514,14 +503,6 @@ export default function Home() {
 
   return (
     <main>
-      <button
-        className={styles.modeToggle}
-        onClick={() => setDark((current) => !current)}
-        title={dark ? "Switch to light mode" : "Switch to dark mode"}
-      >
-        {dark ? "☀" : "☾"}
-      </button>
-
       <div className={styles.docShell}>
         <section className={styles.splash} id="splash">
           <div className={styles.splashPanel}>
