@@ -192,7 +192,7 @@ export default function AuthPage() {
 
       {/* ── LEFT — brand context ── */}
       <div style={{
-        position: "relative",
+        position: "relative", 
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
