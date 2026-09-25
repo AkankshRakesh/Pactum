@@ -201,11 +201,7 @@ export default function AuthPage() {
         backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, var(--ink-ghost) 27px, var(--ink-ghost) 28px)",
         overflow: "hidden",
       }}>
-        {/* red margin rule */}
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: 68, width: 1, background: "rgba(184,28,16,0.28)" }} />
-        {/* top bar */}
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "var(--ink)" }} />
-
+        
         {/* back + logo */}
         <div>
           <button
