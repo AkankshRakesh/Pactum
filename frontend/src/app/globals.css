@@ -1,5 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
 
 /* ===================================================================
    Design tokens
@@ -45,18 +48,6 @@ body {
   color: var(--ink);
   font-family: 'Courier Prime', 'Courier New', monospace;
   transition: background 0.35s ease, color 0.35s ease;
-}
-
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: repeating-linear-gradient(
-    0deg, transparent, transparent 27px,
-    rgba(26, 24, 16, 0.035) 27px, rgba(26, 24, 16, 0.035) 28px
-  );
-  pointer-events: none;
-  z-index: 1000;
 }
 
 a { color: inherit; }

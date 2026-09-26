@@ -502,7 +502,7 @@ export default function Home() {
   }, []);
 
   return (
-    <main>
+    <main className={styles.homePage}>
       <div className={styles.docShell}>
         <section className={styles.splash} id="splash">
           <div className={styles.splashPanel}>

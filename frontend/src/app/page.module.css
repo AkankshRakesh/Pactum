@@ -5,7 +5,7 @@
 :global(.dark) { --paper: #151210; --paper-dark: #1c1814; --ink: #e8e0cc; --ink-faded: rgba(232,224,204,.45); --ink-ghost: rgba(232,224,204,.08); --red: #cc3322; --rule: rgba(232,224,204,.12); --shadow: rgba(0,0,0,.5); --tint: rgba(232,224,204,.025); }
 :global(html), :global(body) { height: 100%; margin: 0; padding: 0; }
 :global(body) { background: var(--paper-dark); color: var(--ink); font-family: 'Courier Prime', 'Courier New', monospace; transition: background .35s ease, color .35s ease; }
-:global(body::before) { content: ''; position: fixed; inset: 0; background-image: repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(26,24,16,.035) 27px,rgba(26,24,16,.035) 28px); pointer-events: none; z-index: 1000; }
+.homePage::before { content: ''; position: fixed; inset: 0; background-image: repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(26,24,16,.035) 27px,rgba(26,24,16,.035) 28px); pointer-events: none; z-index: 1000; }
 :global(a) { color: inherit; }
 
 .docShell { background: var(--paper); margin: 0 auto; box-shadow: 0 0 80px var(--shadow); transition: background .35s ease, box-shadow .35s ease; }
