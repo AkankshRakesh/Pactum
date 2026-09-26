@@ -4,7 +4,7 @@
 :global(:root) { --paper: #f4efe3; --paper-dark: #ebe4d4; --ink: #1a1810; --ink-faded: rgba(26,24,16,.45); --ink-ghost: rgba(26,24,16,.12); --red: #b81c10; --rule: rgba(26,24,16,.18); --shadow: rgba(26,24,16,.12); --tint: rgba(26,24,16,.018); }
 :global(.dark) { --paper: #151210; --paper-dark: #1c1814; --ink: #e8e0cc; --ink-faded: rgba(232,224,204,.45); --ink-ghost: rgba(232,224,204,.08); --red: #cc3322; --rule: rgba(232,224,204,.12); --shadow: rgba(0,0,0,.5); --tint: rgba(232,224,204,.025); }
 :global(html), :global(body) { height: 100%; margin: 0; padding: 0; }
-:global(body) { background: var(--paper-dark); color: var(--ink); font-family: 'Courier Prime', 'Courier New', monospace; transition: background .35s ease, color .35s ease; }
+:global(body) { background: var(--paper-dark); color: var(--ink); font-family: 'DM Sans', Arial, sans-serif; transition: background .35s ease, color .35s ease; }
 .homePage::before { content: ''; position: fixed; inset: 0; background-image: repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(26,24,16,.035) 27px,rgba(26,24,16,.035) 28px); pointer-events: none; z-index: 1000; }
 :global(a) { color: inherit; }
 
@@ -13,15 +13,15 @@
 .modeToggle:hover { border-color: var(--red); }
 .splash { position: relative; min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; background: var(--paper);}
 .splashPanel { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 80px 64px 80px 80px; border-right: 1px solid var(--rule); background-image: repeating-linear-gradient(transparent,transparent 27px,var(--ink-ghost) 27px,var(--ink-ghost) 28px); }
-.splashMeta { position: absolute; top: 28px; left: 88px; font-size: 10px; color: var(--ink-faded); letter-spacing: .16em; text-transform: uppercase; line-height: 1.9; }
-.splashBrandLabel { font-size: 10px; letter-spacing: .38em; color: var(--ink-faded); text-transform: uppercase; margin-bottom: 14px; }
+.splashMeta { position: absolute; top: 28px; left: 88px; font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; color: var(--ink-faded); letter-spacing: .16em; text-transform: uppercase; line-height: 1.9; }
+.splashBrandLabel { font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; letter-spacing: .38em; color: var(--ink-faded); text-transform: uppercase; margin-bottom: 14px; }
 .splashBrandName { font-family: 'Playfair Display',Georgia,serif; font-size: clamp(48px,7vw,96px); font-weight: 900; line-height: .9; margin: 0; letter-spacing: -.025em; color: var(--ink); }
 .splashBrandDivider { height: 1px; background: var(--ink); margin: 28px 0; opacity: .15; max-width: 320px; }
 .splashBrandPills { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin-bottom: 36px; }
-.splashBrandPill { display: flex; align-items: center; gap: 20px; font-size: 10px; letter-spacing: .2em; color: var(--ink-faded); text-transform: uppercase; }
+.splashBrandPill { display: flex; align-items: center; gap: 20px; font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; letter-spacing: .2em; color: var(--ink-faded); text-transform: uppercase; }
 .splashBrandPill::after { content: ''; width: 3px; height: 3px; background: var(--red); border-radius: 50%; display: inline-block; }
 .splashBrandPill:last-child::after { display: none; }
-.splashCta { display: inline-flex; align-items: center; width: fit-content; padding: 14px 32px; background: var(--ink); color: var(--paper); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; text-decoration: none; border: 1px solid var(--ink); transition: background .2s ease,color .2s ease,transform .15s ease; }
+.splashCta { display: inline-flex; align-items: center; width: fit-content; padding: 14px 32px; background: var(--ink); color: var(--paper); font-family: 'DM Sans', Arial, sans-serif; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; text-decoration: none; border: 1px solid var(--ink); transition: background .2s ease,color .2s ease,transform .15s ease; }
 .splashCta:hover { background: transparent; color: var(--ink); transform: translateX(2px); }
 .splashStage { position: relative; display: flex; align-items: center; justify-content: center; background: var(--tint); background-image: repeating-linear-gradient(transparent,transparent 27px,var(--ink-ghost) 27px,var(--ink-ghost) 28px); overflow: hidden; opacity: 0; transition: opacity .8s ease .3s; }
 .splashReady { opacity: 1; }
