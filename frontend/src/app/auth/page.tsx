@@ -24,7 +24,7 @@ function FloatInput({
     <div className="relative mb-5">
       <label
         className={[
-          "pointer-events-none absolute left-4 z-10 font-sans transition-all duration-180 ease-out",
+          "pointer-events-none absolute left-4 z-10 pactum-mono transition-all duration-180 ease-out",
           lifted
             ? "top-2 text-[10px] font-medium uppercase tracking-[0.08em]"
             : "top-1/2 -translate-y-1/2 text-sm font-normal",
@@ -40,7 +40,7 @@ function FloatInput({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         className={[
-          "h-14.5 w-full rounded font-sans text-sm outline-none transition-colors duration-180",
+          "h-14.5 w-full rounded pactum-mono text-sm outline-none transition-colors duration-180",
           "pt-5 pb-2 px-4",
           "bg-black/3 text-black dark:bg-white/5 dark:text-white",
           "border",
@@ -81,13 +81,13 @@ function RolePill({
       <div className="mb-1.5 text-xl">{icon}</div>
       <div
         className={[
-          "mb-0.75 font-sans text-[13px] font-semibold",
+          "mb-0.75 pactum-mono text-[13px] font-semibold",
           selected ? "text-[#8B2635] dark:text-[#C1445A]" : "text-black dark:text-white",
         ].join(" ")}
       >
         {label}
       </div>
-      <div className="font-sans text-[11px] leading-[1.4] text-black/40 dark:text-white/40">{sub}</div>
+      <div className="pactum-mono text-[11px] leading-[1.4] text-black/40 dark:text-white/40">{sub}</div>
     </button>
   );
 }
@@ -127,7 +127,7 @@ export default function AuthPage() {
 
   if (done) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center bg-[#FAF6F2] font-sans dark:bg-[#0F0708]">
+      <div className="relative flex min-h-screen items-center justify-center bg-[#FAF6F2] pactum-mono dark:bg-[#0F0708]">
         <div
           className="pointer-events-none absolute inset-0"
           style={{
@@ -142,7 +142,7 @@ export default function AuthPage() {
           <div className="mb-4 text-[11px] font-medium uppercase tracking-[0.14em] text-[#8B2635] dark:text-[#C1445A]">
             {isSignup ? "Registration complete" : "Welcome back"}
           </div>
-          <h2 className="m-0 mb-3 text-[32px] font-bold leading-[1.1] text-black dark:text-white">
+          <h2 className="m-0 mb-3 pactum-display text-[32px] font-bold leading-[1.1] text-black dark:text-white">
             {isSignup ? `You're in, ${name || "there"}.` : "Access granted."}
           </h2>
           <p className="mb-9 text-sm leading-[1.75] text-black/50 dark:text-white/45">
@@ -152,7 +152,7 @@ export default function AuthPage() {
           </p>
           <button
             onClick={() => router.push("/")}
-            className="rounded bg-[#C1445A] px-9 py-3.5 font-sans text-sm font-bold tracking-[0.04em] text-[#0F0708] transition-colors duration-180 hover:bg-[#E0637A]"
+            className="rounded bg-[#C1445A] px-9 py-3.5 pactum-mono text-sm font-bold tracking-[0.04em] text-[#0F0708] transition-colors duration-180 hover:bg-[#E0637A]"
           >
             Enter Pactum →
           </button>
@@ -163,7 +163,7 @@ export default function AuthPage() {
 
 
   return (
-    <div className="relative min-h-screen bg-[#FAF6F2] font-sans dark:bg-[#0F0708]">
+    <div className="relative min-h-screen bg-[#FAF6F2] pactum-mono dark:bg-[#0F0708]">
     {/* Lightfall — full page background */}
     <div className="pointer-events-none absolute inset-0 z-0">
       <Lightfall
@@ -197,7 +197,7 @@ export default function AuthPage() {
       <button
         type="button"
         onClick={() => router.push("/")}
-        className="inline-flex items-center gap-2 border-none bg-transparent p-0 font-sans text-[13px] text-black/40 transition-colors duration-180 hover:text-black dark:text-white/35 dark:hover:text-white"
+        className="inline-flex items-center gap-2 border-none bg-transparent p-0 pactum-mono text-[13px] text-black/40 transition-colors duration-180 hover:text-black dark:text-white/35 dark:hover:text-white"
       >
         <span className="text-base">←</span> Back to Pactum
       </button>
@@ -211,7 +211,7 @@ export default function AuthPage() {
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-[#8B2635] dark:text-[#C1445A]">
             Pactum
           </div>
-          <h2 className="m-0 font-serif text-2xl font-black leading-tight tracking-[-0.02em] text-black dark:text-white">
+          <h2 className="m-0 pactum-display text-2xl font-black leading-tight tracking-[-0.02em] text-black dark:text-white">
             Contracts that <em className="not-italic italic text-[#8B2635] dark:text-[#C1445A]">can't be broken.</em>
           </h2>
         </div>
@@ -223,7 +223,7 @@ export default function AuthPage() {
               key={m}
               onClick={() => setMode(m)}
               className={[
-                "flex-1 rounded py-[9px] font-sans text-[13px] transition-all duration-180",
+                "flex-1 rounded py-[9px] pactum-mono text-[13px] transition-all duration-180",
                 mode === m
                   ? "bg-white font-semibold text-black shadow-[0_1px_4px_rgba(0,0,0,0.08)] dark:bg-white/[0.08] dark:text-white dark:shadow-[0_1px_4px_rgba(0,0,0,0.3)]"
                   : "bg-transparent font-normal text-black/40 dark:text-white/35",
@@ -236,7 +236,7 @@ export default function AuthPage() {
 
         {/* heading */}
         <div className="mb-7">
-          <h1 className="m-0 mb-1.5 text-2xl font-bold leading-tight text-black dark:text-white">
+          <h1 className="m-0 mb-1.5 pactum-display text-2xl font-bold leading-tight text-black dark:text-white">
             {isSignup ? "Create your account" : "Welcome back"}
           </h1>
           <p className="m-0 text-[13px] leading-[1.6] text-black/45 dark:text-white/40">
@@ -315,7 +315,7 @@ export default function AuthPage() {
               type="submit"
               disabled={!canSubmit}
               className={[
-                "mb-5 w-full rounded border py-3.5 font-sans text-sm font-bold transition-all duration-180",
+                "mb-5 w-full rounded border py-3.5 pactum-mono text-sm font-bold transition-all duration-180",
                 canSubmit
                   ? "cursor-pointer border-[#C1445A] bg-[#C1445A] text-[#0F0708] hover:bg-[#E0637A]"
                   : "cursor-not-allowed border-black/[0.07] bg-black/[0.03] text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
@@ -334,7 +334,7 @@ export default function AuthPage() {
             {/* SSO */}
             <button
               type="button"
-              className="flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 font-sans text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
+              className="flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 pactum-mono text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path

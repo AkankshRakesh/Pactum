@@ -50,6 +50,9 @@ body {
   transition: background 0.35s ease, color 0.35s ease;
 }
 
+.pactum-mono { font-family: 'Courier Prime', 'Courier New', monospace; }
+.pactum-display { font-family: 'Playfair Display', Georgia, serif; }
+
 a { color: inherit; }
 
 /* ===================================================================
