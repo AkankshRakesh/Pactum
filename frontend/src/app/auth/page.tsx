@@ -5,6 +5,8 @@ import Lightfall from "./lightfall";
 
 type Mode = "login" | "signup";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+
 /* ── floating-label input ─────────────────────────────────────────── */
 function FloatInput({
   label,
@@ -147,6 +149,15 @@ export default function AuthPage() {
   const [agreed, setAgreed] = useState(false);
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [done, setDone] = useState(false);
+  const [oauthError, setOauthError] = useState("");
+
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get("error");
+    if (error) {
+      setOauthError("Google sign-in could not be completed. Please try again.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const isSignup = mode === "signup";
   const canSubmit = email && password && (!isSignup || (name && agreed));
@@ -270,6 +281,7 @@ export default function AuthPage() {
               ? "Start creating legally binding contracts in minutes."
               : "Sign in to access your sealed contracts and agreements."}
           </p>
+          {oauthError && <p className="mt-3 pactum-body text-[13px] text-[#8B2635] dark:text-[#E0637A]">{oauthError}</p>}
         </div>
 
           {/* form */}
@@ -284,6 +296,7 @@ export default function AuthPage() {
             {/* SSO */}
             <button
               type="button"
+              onClick={() => window.location.assign(`${API_BASE}/api/auth/google/start/`)}
               className="cursor-pointer flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 pactum-body text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">

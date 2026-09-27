@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drafting contract — loading</title>
+<style>
+  :root {
+    --paper: #FBF5EA;
+    --paper-edge: #E9DCC3;
+    --ink-dark: #6E3B22;
+    --ink-mid: #8C5A34;
+    --rule: #D8C4A0;
+    --backdrop: #2A160D;
+    --backdrop-2: #4A2818;
+    --page-bg: #171012;
+    --label: #C9A57C;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --page-bg: #F4EEE3; --label: #7A5A3A; }
+  }
+  :root[data-theme="light"] { --page-bg: #F4EEE3; --label: #7A5A3A; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); height: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--page-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, 'Times New Roman', serif;
+    overflow: hidden;
+  }
+  .stage { width: min(60vw, 60vh, 340px); aspect-ratio: 1 / 1; }
+  svg { width: 100%; height: 100%; display: block; overflow: visible; }
+
+  .rule-line { stroke-dasharray: 0.03 0.025; pathLength: 1; }
+  .dot { opacity: 0; }
+
+  .caret { opacity: 0; animation: blink 900ms steps(1) infinite; }
+  @keyframes blink { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
+
+  .label { font-size: 15px; letter-spacing: .02em; color: var(--label); }
+  .label .dots span { animation: dotFade 1400ms ease-in-out infinite; opacity: .2; }
+  .label .dots span:nth-child(2) { animation-delay: 180ms; }
+  .label .dots span:nth-child(3) { animation-delay: 360ms; }
+  @keyframes dotFade { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caret { display: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="stage">
+    <svg id="scene" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="backdropGrad" cx="38%" cy="32%" r="75%">
+          <stop offset="0%" stop-color="var(--backdrop-2)"/>
+          <stop offset="100%" stop-color="var(--backdrop)"/>
+        </radialGradient>
+      </defs>
+
+      <circle cx="210" cy="200" r="168" fill="url(#backdropGrad)"/>
+
+      <g>
+        <path d="M75,40 H255 a14,14 0 0 1 14,14 V330 a10,10 0 0 1 -10,10 H85 a10,10 0 0 1 -10,-10 V54 a14,14 0 0 1 14,-14 Z
+                 M75,40 a14,14 0 0 0 -14,14 V60 l14,-8 l14,8 V54 a14,14 0 0 0 -14,-14 Z"
+              fill="var(--paper)" stroke="var(--paper-edge)" stroke-width="2"/>
+
+        <g id="lines"></g>
+
+        <line id="ruleLine" class="rule-line" x1="98" y1="272" x2="232" y2="272" stroke="var(--rule)" stroke-width="3" stroke-linecap="round"/>
+
+        <rect class="caret" x="0" y="0" width="3" height="12" rx="1.5" fill="var(--ink-dark)"/>
+      </g>
+    </svg>
+  </div>
+
+  <p class="label">Drafting your contract<span class="dots"><span>.</span><span>.</span><span>.</span></span></p>
+
+<script>
+(() => {
+  // Each "text" segment becomes a row of dots (placeholder glyphs).
+  // The "rule" segment is the literal signature underline, drawn as a line.
+  const specs = [
+    { type: 'text', x1: 98,  y1: 76,  x2: 205, y2: 76,  r: 4.4, gap: 13, color: 'var(--ink-dark)' }, // title
+    { type: 'text', x1: 98,  y1: 106, x2: 232, y2: 106, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'text', x1: 98,  y1: 126, x2: 232, y2: 126, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'text', x1: 98,  y1: 146, x2: 188, y2: 146, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'text', x1: 98,  y1: 176, x2: 232, y2: 176, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'text', x1: 98,  y1: 196, x2: 232, y2: 196, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'text', x1: 98,  y1: 216, x2: 152, y2: 216, r: 3.1, gap: 9,  color: 'var(--ink-mid)' },
+    { type: 'rule', x1: 98,  y1: 272, x2: 232, y2: 272 },
+    { type: 'text', x1: 98,  y1: 288, x2: 146, y2: 288, r: 2.6, gap: 8,  color: 'var(--ink-dark)' },
+    { type: 'text', x1: 184, y1: 288, x2: 220, y2: 288, r: 2.6, gap: 8,  color: 'var(--ink-dark)' },
+  ];
+
+  const linesGroup = document.getElementById('lines');
+  const ruleEl = document.getElementById('ruleLine');
+  const caret = document.querySelector('.caret');
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  const segments = specs.map(s => {
+    const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+    if (s.type === 'rule') {
+      return { ...s, len, el: ruleEl };
+    }
+    const dots = [];
+    const count = Math.max(1, Math.floor(len / s.gap));
+    for (let i = 0; i < count; i++) {
+      const p = count === 1 ? 0 : i / (count - 1);
+      const x = s.x1 + (s.x2 - s.x1) * p;
+      const y = s.y1 + (s.y2 - s.y1) * p;
+      const c = document.createElementNS(svgNS, 'circle');
+      c.setAttribute('cx', x);
+      c.setAttribute('cy', y);
+      c.setAttribute('r', s.r);
+      c.setAttribute('fill', s.color);
+      c.classList.add('dot');
+      linesGroup.appendChild(c);
+      dots.push({ x, y, el: c });
+    }
+    return { ...s, len, dots };
+  });
+
+  const totalLen = segments.reduce((sum, s) => sum + s.len, 0);
+  const TYPE_MS = 2800, PAUSE_MS = 1000, ERASE_MS = 1700;
+  const CYCLE_MS = TYPE_MS + PAUSE_MS + ERASE_MS;
+
+  // forward (typing) schedule, left to right
+  let acc = 0;
+  segments.forEach(s => {
+    s.typeStartMs = acc;
+    s.durMs = (s.len / totalLen) * TYPE_MS;
+    acc += s.durMs;
+  });
+
+  // reverse (backspacing) schedule, last segment erases first
+  acc = 0;
+  [...segments].reverse().forEach(s => {
+    s.eraseStartMs = acc;
+    s.eraseDurMs = (s.len / totalLen) * ERASE_MS;
+    acc += s.eraseDurMs;
+  });
+
+  // frac = 1 -> segment fully written/visible, 0 -> fully hidden
+  function applyFrac(s, frac) {
+    if (s.type === 'rule') {
+      s.el.style.strokeDasharray = `${frac} ${Math.max(0, 1 - frac)}`;
+      s.el.style.strokeDashoffset = '0';
+    } else {
+      const visible = Math.round(frac * s.dots.length);
+      s.dots.forEach((d, i) => { d.el.style.opacity = i < visible ? 1 : 0; });
+    }
+  }
+
+  function caretPos(s, frac) {
+    if (s.type === 'rule') {
+      return { x: s.x1 + (s.x2 - s.x1) * frac, y: s.y1 - 8 };
+    }
+    const idx = Math.min(s.dots.length - 1, Math.max(0, Math.round(frac * s.dots.length)));
+    const d = s.dots[idx] || s.dots[s.dots.length - 1];
+    return { x: d.x, y: d.y - s.r - 7 };
+  }
+
+  const start = performance.now();
+
+  function frame(now) {
+    const t = (now - start) % CYCLE_MS;
+    let activeCaret = null;
+
+    if (t < TYPE_MS) {
+      for (const s of segments) {
+        const localT = t - s.typeStartMs;
+        const clamped = localT <= 0 ? 0 : localT >= s.durMs ? 1 : localT / s.durMs;
+        applyFrac(s, clamped);
+        if (localT > 0 && localT < s.durMs) activeCaret = caretPos(s, clamped);
+      }
+    } else if (t < TYPE_MS + PAUSE_MS) {
+      segments.forEach(s => applyFrac(s, 1));
+    } else {
+      const et = t - TYPE_MS - PAUSE_MS;
+      for (const s of segments) {
+        const localT = et - s.eraseStartMs;
+        const clamped = localT <= 0 ? 0 : localT >= s.eraseDurMs ? 1 : localT / s.eraseDurMs;
+        const frac = 1 - clamped;
+        applyFrac(s, frac);
+        if (localT > 0 && localT < s.eraseDurMs) activeCaret = caretPos(s, frac);
+      }
+    }
+
+    if (activeCaret) {
+      caret.style.display = 'block';
+      caret.style.transform = `translate(${activeCaret.x - 1.5}px, ${activeCaret.y}px)`;
+    } else {
+      caret.style.display = 'none';
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  segments.forEach(s => applyFrac(s, 0));
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,10 +1,16 @@
 import json
+import re
+import secrets
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
@@ -180,6 +186,104 @@ def home_data(request):
 
 
 User = get_user_model()
+
+
+def _google_error_redirect(code):
+    return redirect(f"{settings.FRONTEND_URL}/auth?error={code}")
+
+
+def _google_request(url, data=None, headers=None):
+    request = Request(
+        url,
+        data=urlencode(data).encode() if data else None,
+        headers=headers or {},
+        method="POST" if data else "GET",
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode())
+
+
+def _google_username(email):
+    base = re.sub(r"[^a-zA-Z0-9._-]", "", email.split("@", 1)[0]).strip("._-") or "google-user"
+    base = base[:150]
+    username = base
+    suffix = 1
+    while User.objects.filter(username__iexact=username).exists():
+        suffix_text = f"-{suffix}"
+        username = f"{base[:150 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    return username
+
+
+def google_start(request):
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        return JsonResponse({"detail": "Google OAuth is not configured."}, status=503)
+
+    state = secrets.token_urlsafe(32)
+    request.session["google_oauth_state"] = state
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}")
+
+
+def google_callback(request):
+    state = request.GET.get("state", "")
+    expected_state = request.session.pop("google_oauth_state", "")
+    if not state or not expected_state or not secrets.compare_digest(state, expected_state):
+        return _google_error_redirect("invalid_oauth_state")
+
+    if request.GET.get("error"):
+        return _google_error_redirect("google_consent_denied")
+
+    code = request.GET.get("code", "")
+    if not code or not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        return _google_error_redirect("google_auth_unavailable")
+
+    try:
+        token_data = _google_request(
+            "https://oauth2.googleapis.com/token",
+            {
+                "code": code,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+        )
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return _google_error_redirect("google_token_exchange_failed")
+
+        profile = _google_request(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        return _google_error_redirect("google_profile_failed")
+
+    email = str(profile.get("email", "")).strip().lower()
+    email_verified = profile.get("email_verified") is True or profile.get("email_verified") == "true"
+    if not email or not email_verified or not profile.get("sub"):
+        return _google_error_redirect("unverified_google_email")
+
+    user = User.objects.filter(email__iexact=email).first()
+    if user is None:
+        user = User.objects.create_user(
+            username=_google_username(email),
+            email=email,
+            first_name=str(profile.get("given_name", ""))[:150],
+            last_name=str(profile.get("family_name", ""))[:150],
+        )
+
+    login(request, user)
+    return redirect(f"{settings.FRONTEND_URL}/dashboard")
 
 
 def _user_data(user):

@@ -11,5 +11,7 @@ urlpatterns = [
     path("api/auth/login/", views.login_view, name="login"),
     path("api/auth/logout/", views.logout_view, name="logout"),
     path("api/auth/me/", views.current_user, name="current-user"),
+    path("api/auth/google/start/", views.google_start, name="google-start"),
+    path("api/auth/google/callback/", views.google_callback, name="google-callback"),
     path("", views.home, name="home"),
 ]
