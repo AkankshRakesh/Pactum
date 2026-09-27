@@ -53,45 +53,6 @@ function FloatInput({
   );
 }
 
-/* ── role pill ────────────────────────────────────────────────────── */
-function RolePill({
-  label,
-  sub,
-  icon,
-  selected,
-  onClick,
-}: {
-  label: string;
-  sub: string;
-  icon: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "flex-1 rounded border px-3 py-4 text-left transition-all duration-180",
-        selected
-          ? "border-[#8B2635]/70 bg-[#8B2635]/10 dark:border-[#C1445A]/70 dark:bg-[#C1445A]/12"
-          : "border-black/10 bg-black/2 dark:border-white/8 dark:bg-white/3",
-      ].join(" ")}
-    >
-      <div className="mb-1.5 text-xl">{icon}</div>
-      <div
-        className={[
-          "mb-0.75 pactum-body text-[13px] font-semibold",
-          selected ? "text-[#8B2635] dark:text-[#C1445A]" : "text-black dark:text-white",
-        ].join(" ")}
-      >
-        {label}
-      </div>
-      <div className="pactum-body text-[11px] leading-[1.4] text-black/40 dark:text-white/40">{sub}</div>
-    </button>
-  );
-}
-
 function useIsDark() {
   const [isDark, setIsDark] = useState(false);
 
@@ -110,6 +71,71 @@ function useIsDark() {
   return isDark;
 }
 
+function AgreementModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  const clauses = [
+    ["1. Formation and consent", "A contract is formed only when the creator and invited party review the same contract terms and each complete the required signature action. Creating an account or viewing a draft does not, by itself, create a contract."],
+    ["2. Binding effect", "Once both parties sign, each party agrees to be legally bound by the contract terms, including payment, delivery, confidentiality, ownership, and dispute provisions stated in that contract."],
+    ["3. Electronic signatures", "Each party agrees that an electronic signature, authentication record, timestamp, and associated audit data may be used as evidence of intent and may have the same legal effect as a handwritten signature where permitted by applicable law."],
+    ["4. Contract identity and immutability", "After execution, Pactum seals the final contract and records its identifying hash. The executed version cannot be edited through the platform. Later changes require a new contract or a separately executed amendment."],
+    ["5. Records and evidence", "Pactum may retain drafts, comments, signature events, timestamps, participant identity data, and sealing records as an audit trail. The parties authorize these records to be produced to establish the history and integrity of a contract."],
+    ["6. Responsibilities of the parties", "The creator is responsible for inviting the correct party and supplying accurate terms. The invited party is responsible for reviewing the contract before signing. Each party must protect its credentials and promptly report suspected unauthorized access."],
+    ["7. Disputes and proceedings", "The parties should first use any notice, cure, negotiation, mediation, arbitration, venue, and governing-law process written in the applicable contract. If a contract does not specify a process, the dispute will be handled under the applicable law and courts with proper jurisdiction. Pactum is a recordkeeping platform and is not a party to the contract or a provider of legal advice."],
+    ["8. Acceptance of these terms", "By selecting the acceptance control and creating an account, you confirm that you have read this Platform Service Agreement, understand its effect, and have authority to accept these terms. This agreement supplements the terms stated in each individual contract."],
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F0708]/55 px-4 py-6 backdrop-blur-sm sm:px-6"
+      role="presentation"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="relative flex max-h-[min(88vh,760px)] w-full max-w-170 flex-col overflow-hidden rounded-xl border border-[#8B2635]/30 bg-[#FAF6F2] shadow-[0_20px_80px_rgba(15,7,8,0.35)] dark:border-[#C1445A]/35 dark:bg-[#160B0C]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agreement-title"
+      >
+        <div className="flex items-start justify-between gap-6 border-b border-black/10 px-6 py-5 dark:border-white/10 sm:px-8">
+          <div>
+            <p className="mb-1 pactum-body text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8B2635] dark:text-[#C1445A]">Platform Service Agreement</p>
+            <h2 id="agreement-title" className="m-0 pactum-display text-2xl font-bold text-black dark:text-white">Terms of binding use</h2>
+          </div>
+          <button type="button" onClick={onClose} className="pactum-body text-2xl leading-none text-black/45 hover:text-[#8B2635] dark:text-white/45 dark:hover:text-[#E0637A]" aria-label="Close agreement">×</button>
+        </div>
+        <div className="overflow-y-auto px-6 py-6 sm:px-8">
+          <p className="mb-6 pactum-body text-sm leading-[1.75] text-black/55 dark:text-white/55">Please review these platform terms before accepting. The individual contract between the creator and invited party controls the commercial details of each engagement.</p>
+          <div className="space-y-5">
+            {clauses.map(([title, body]) => (
+              <article key={title}>
+                <h3 className="mb-1 pactum-body text-sm font-bold text-black dark:text-white">{title}</h3>
+                <p className="m-0 pactum-body text-[13px] leading-[1.7] text-black/55 dark:text-white/55">{body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="border-t border-black/10 px-6 py-4 dark:border-white/10 sm:px-8">
+          <button type="button" onClick={onClose} className="w-full rounded bg-[#C1445A] px-5 py-3 pactum-body text-sm font-bold text-[#0F0708] hover:bg-[#E0637A]">Return to registration</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 /* ── main ─────────────────────────────────────────────────────────── */
 export default function AuthPage() {
   const router = useRouter();
@@ -118,12 +144,12 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"freelancer" | "contractor" | "">("");
   const [agreed, setAgreed] = useState(false);
+  const [agreementOpen, setAgreementOpen] = useState(false);
   const [done, setDone] = useState(false);
 
   const isSignup = mode === "signup";
-  const canSubmit = email && password && (!isSignup || (name && role && agreed));
+  const canSubmit = email && password && (!isSignup || (name && agreed));
 
   if (done) {
     return (
@@ -152,7 +178,7 @@ export default function AuthPage() {
           </p>
           <button
             onClick={() => router.push("/")}
-            className="rounded bg-[#C1445A] px-9 py-3.5 pactum-body text-sm font-bold tracking-[0.04em] text-[#0F0708] transition-colors duration-180 hover:bg-[#E0637A]"
+            className="rounded bg-[#C1445A] cursor-pointer px-9 py-3.5 pactum-body text-sm font-bold tracking-[0.04em] text-[#0F0708] transition-colors duration-180 hover:bg-[#E0637A]"
           >
             Enter Pactum →
           </button>
@@ -197,7 +223,7 @@ export default function AuthPage() {
       <button
         type="button"
         onClick={() => router.push("/")}
-        className="inline-flex items-center gap-2 border-none bg-transparent p-0 pactum-body text-[13px] text-black/40 transition-colors duration-180 hover:text-black dark:text-white/35 dark:hover:text-white"
+        className="inline-flex cursor-pointer items-center gap-2 border-none bg-transparent p-0 pactum-body text-[13px] text-black/40 transition-colors duration-180 hover:text-black dark:text-white/35 dark:hover:text-white"
       >
         <span className="text-base">←</span> Back to Pactum
       </button>
@@ -253,84 +279,6 @@ export default function AuthPage() {
               canSubmit && setDone(true);
             }}
           >
-            {isSignup && <FloatInput label="Full legal name" value={name} onChange={setName} />}
-
-            <FloatInput label="Email address" type="email" value={email} onChange={setEmail} />
-            <FloatInput label="Password" type="password" value={password} onChange={setPassword} />
-
-            {isSignup && (
-              <>
-                <div className="mb-5">
-                  <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-black/40 dark:text-white/35">
-                    I am a…
-                  </div>
-                  <div className="flex flex-col gap-2.5 sm:flex-row">
-                    <RolePill
-                      label="Freelancer"
-                      sub="I provide services to clients"
-                      icon="✦"
-                      selected={role === "freelancer"}
-                      onClick={() => setRole("freelancer")}
-                    />
-                    <RolePill
-                      label="Contractor"
-                      sub="I hire freelancers for work"
-                      icon="◈"
-                      selected={role === "contractor"}
-                      onClick={() => setRole("contractor")}
-                    />
-                  </div>
-                </div>
-
-                <label className="mb-6 flex cursor-pointer items-start gap-3">
-                  <div
-                    onClick={() => setAgreed(a => !a)}
-                    className={[
-                      "mt-px flex h-[18px] w-[18px] flex-shrink-0 cursor-pointer items-center justify-center rounded-[3px] border-[1.5px] transition-all duration-180",
-                      agreed
-                        ? "border-[#C1445A] bg-[#C1445A]"
-                        : "border-black/20 bg-transparent dark:border-white/20",
-                    ].join(" ")}
-                  >
-                    {agreed && <span className="text-[11px] font-bold leading-none text-[#0F0708]">✓</span>}
-                  </div>
-                  <span className="text-xs leading-[1.75] text-black/50 dark:text-white/40">
-                    I agree to the{" "}
-                    <span className="cursor-pointer border-b border-black/20 text-black/75 dark:border-white/20 dark:text-white/75">
-                      Platform Service Agreement
-                    </span>{" "}
-                    and understand all sealed contracts are legally binding and immutable.
-                  </span>
-                </label>
-              </>
-            )}
-
-            {!isSignup && (
-              <div className="-mt-2 mb-5 text-right">
-                <span className="cursor-pointer text-xs text-[#8B2635] dark:text-[#C1445A]">Forgot password?</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className={[
-                "mb-5 w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
-                canSubmit
-                  ? "cursor-pointer border-[#C1445A] bg-[#C1445A] text-[#0F0708] hover:bg-[#E0637A]"
-                  : "cursor-not-allowed border-black/[0.07] bg-black/[0.03] text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
-              ].join(" ")}
-            >
-              {isSignup ? "Create account" : "Sign in"}
-            </button>
-
-            {/* divider */}
-            <div className="mb-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
-              <span className="text-[11px] tracking-[0.06em] text-black/30 dark:text-white/25">OR</span>
-              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
-            </div>
-
             {/* SSO */}
             <button
               type="button"
@@ -356,6 +304,64 @@ export default function AuthPage() {
               </svg>
               Continue with Google
             </button>
+
+            {/* divider */}
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
+              <span className="text-[11px] tracking-[0.06em] text-black/30 dark:text-white/25">OR</span>
+              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
+            </div>
+
+            {isSignup && <FloatInput label="Full legal name" value={name} onChange={setName} />}
+            
+            <FloatInput label="Email address" type="email" value={email} onChange={setEmail} />
+            <FloatInput label="Password" type="password" value={password} onChange={setPassword} />
+
+            {isSignup && (
+              <div className="mb-6 flex items-start gap-3">
+                <button
+                  type="button"
+                  aria-pressed={agreed}
+                  aria-label="Accept Platform Service Agreement"
+                  onClick={() => setAgreed(a => !a)}
+                  className={[
+                    "mt-px flex h-[18px] w-[18px] flex-shrink-0 cursor-pointer items-center justify-center rounded-[3px] border-[1.5px] transition-all duration-180",
+                    agreed
+                      ? "border-[#C1445A] bg-[#C1445A]"
+                      : "border-black/20 bg-transparent dark:border-white/20",
+                  ].join(" ")}
+                >
+                  {agreed && <span className="text-[11px] font-bold leading-none text-[#0F0708]">✓</span>}
+                </button>
+                <span className="text-xs leading-[1.75] text-black/50 dark:text-white/40">
+                  I agree to the{" "}
+                  <button type="button" onClick={() => setAgreementOpen(true)} className="border-0 border-b border-black/20 bg-transparent p-0 text-left text-black/75 dark:border-white/20 dark:text-white/75">
+                    Platform Service Agreement
+                  </button>{" "}
+                  and understand all sealed contracts are legally binding and immutable.
+                </span>
+              </div>
+            )}
+
+            {!isSignup && (
+              <div className="-mt-2 mb-5 text-right">
+                <span className="cursor-pointer text-xs text-[#8B2635] dark:text-[#C1445A]">Forgot password?</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className={[
+                "mb-5 w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
+                canSubmit
+                  ? "cursor-pointer border-[#C1445A] bg-[#C1445A] text-[#0F0708] hover:bg-[#E0637A]"
+                  : "cursor-not-allowed border-black/[0.07] bg-black/[0.03] text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
+              ].join(" ")}
+            >
+              {isSignup ? "Create account" : "Sign in"}
+            </button>
+            
           </form>
 
           <p className="mt-7 text-center text-xs leading-[1.7] text-black/30 dark:text-white/25">
@@ -375,6 +381,7 @@ export default function AuthPage() {
           </p>
         </div>
       </div>
+      {agreementOpen && <AgreementModal onClose={() => setAgreementOpen(false)} />}
     </div>
   );
 }
