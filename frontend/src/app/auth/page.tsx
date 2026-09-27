@@ -231,27 +231,27 @@ export default function AuthPage() {
 
     {/* centered form card */}
     <div className="relative z-10 flex min-h-[calc(100vh-64px)] items-center justify-center px-5 py-10 sm:px-8">
-      <div className="w-full max-w-[560px] rounded-xl border border-black/[0.06] bg-white/70 p-8 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-md dark:border-white/[0.07] dark:bg-white/[0.04] dark:shadow-[0_8px_40px_rgba(0,0,0,0.4)] sm:p-10">
+      <div className="w-full max-w-140 rounded-xl border border-black/6 bg-white/70 p-8 shadow-[0_8px_40px_rgba(0,0,0,0.08)] backdrop-blur-md dark:border-white/[0.07] dark:bg-white/4 dark:shadow-[0_8px_40px_rgba(0,0,0,0.4)] sm:p-10">
         {/* wordmark, replaces the old left-panel branding */}
         <div className="mb-7 text-center">
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-[#8B2635] dark:text-[#C1445A]">
             Pactum
           </div>
           <h2 className="m-0 pactum-display text-2xl font-black leading-tight tracking-[-0.02em] text-black dark:text-white">
-            Contracts that <em className="not-italic italic text-[#8B2635] dark:text-[#C1445A]">can't be broken.</em>
+            Contracts that <em className="italic text-[#8B2635] dark:text-[#C1445A]">can&apos;t be broken.</em>
           </h2>
         </div>
 
         {/* tab switcher */}
-        <div className="mb-9 flex rounded-md border border-black/[0.08] bg-black/[0.03] p-1 dark:border-white/[0.07] dark:bg-white/[0.04]">
+        <div className="mb-9 flex rounded-md border border-black/8 bg-black/3 p-1 dark:border-white/[0.07] dark:bg-white/4">
           {(["login", "signup"] as Mode[]).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
               className={[
-                "flex-1 rounded py-[9px] pactum-body text-[13px] transition-all duration-180",
+                "flex-1 rounded py-2.25 pactum-body text-[13px] transition-all duration-180",
                 mode === m
-                  ? "bg-white font-semibold text-black shadow-[0_1px_4px_rgba(0,0,0,0.08)] dark:bg-white/[0.08] dark:text-white dark:shadow-[0_1px_4px_rgba(0,0,0,0.3)]"
+                  ? "bg-white font-semibold text-black shadow-[0_1px_4px_rgba(0,0,0,0.08)] dark:bg-white/8 dark:text-white dark:shadow-[0_1px_4px_rgba(0,0,0,0.3)]"
                   : "bg-transparent font-normal text-black/40 dark:text-white/35",
               ].join(" ")}
             >
@@ -276,13 +276,15 @@ export default function AuthPage() {
           <form
             onSubmit={e => {
               e.preventDefault();
-              canSubmit && setDone(true);
+              if (canSubmit) {
+                setDone(true);
+              }
             }}
           >
             {/* SSO */}
             <button
               type="button"
-              className="flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 pactum-body text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
+              className="cursor-pointer flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 pactum-body text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path
@@ -307,9 +309,9 @@ export default function AuthPage() {
 
             {/* divider */}
             <div className="my-5 flex items-center gap-3">
-              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
+              <div className="h-px flex-1 bg-black/8 dark:bg-white/[0.07]" />
               <span className="text-[11px] tracking-[0.06em] text-black/30 dark:text-white/25">OR</span>
-              <div className="h-px flex-1 bg-black/[0.08] dark:bg-white/[0.07]" />
+              <div className="h-px flex-1 bg-black/8 dark:bg-white/[0.07]" />
             </div>
 
             {isSignup && <FloatInput label="Full legal name" value={name} onChange={setName} />}
@@ -325,7 +327,7 @@ export default function AuthPage() {
                   aria-label="Accept Platform Service Agreement"
                   onClick={() => setAgreed(a => !a)}
                   className={[
-                    "mt-px flex h-[18px] w-[18px] flex-shrink-0 cursor-pointer items-center justify-center rounded-[3px] border-[1.5px] transition-all duration-180",
+                    "mt-px flex h-4.5 w-4.5 shrink-0 cursor-pointer items-center justify-center rounded-[3px] border-[1.5px] transition-all duration-180",
                     agreed
                       ? "border-[#C1445A] bg-[#C1445A]"
                       : "border-black/20 bg-transparent dark:border-white/20",
@@ -335,7 +337,7 @@ export default function AuthPage() {
                 </button>
                 <span className="text-xs leading-[1.75] text-black/50 dark:text-white/40">
                   I agree to the{" "}
-                  <button type="button" onClick={() => setAgreementOpen(true)} className="border-0 border-b border-black/20 bg-transparent p-0 text-left text-black/75 dark:border-white/20 dark:text-white/75">
+                  <button type="button" onClick={() => setAgreementOpen(true)} className="border-0 border-b border-black/20 bg-transparent p-0 cursor-pointer text-left text-black/75 dark:border-white/20 dark:text-white/75">
                     Platform Service Agreement
                   </button>{" "}
                   and understand all sealed contracts are legally binding and immutable.
@@ -353,10 +355,10 @@ export default function AuthPage() {
               type="submit"
               disabled={!canSubmit}
               className={[
-                "mb-5 w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
+                "mb-5 cursor-pointer w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
                 canSubmit
                   ? "cursor-pointer border-[#C1445A] bg-[#C1445A] text-[#0F0708] hover:bg-[#E0637A]"
-                  : "cursor-not-allowed border-black/[0.07] bg-black/[0.03] text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
+                  : "cursor-not-allowed border-black/[0.07] bg-black/3 text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
               ].join(" ")}
             >
               {isSignup ? "Create account" : "Sign in"}
@@ -364,20 +366,10 @@ export default function AuthPage() {
             
           </form>
 
-          <p className="mt-7 text-center text-xs leading-[1.7] text-black/30 dark:text-white/25">
-            {isSignup ? "Already have an account? " : "New to Pactum? "}
-            <span
-              onClick={() => setMode(isSignup ? "login" : "signup")}
-              className="cursor-pointer text-[#8B2635] dark:text-[#C1445A]"
-            >
-              {isSignup ? "Sign in" : "Create an account"}
-            </span>
-          </p>
-
           <p className="mt-6 text-center text-[11px] leading-[1.6] text-black/15 dark:text-white/15">
             Protected by ESIGN · eIDAS · UETA
             <br />
-            All credentials encrypted at rest
+            All credentials encrypted
           </p>
         </div>
       </div>
