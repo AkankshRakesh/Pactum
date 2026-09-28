@@ -133,10 +133,11 @@ export default function ContractLoader() {
         });
       }
 
+      const caretPosition = activeCaret as { x: number; y: number } | null;
       if (caretRef.current) {
-        caretRef.current.style.display = activeCaret ? "block" : "none";
-        caretRef.current.style.opacity = activeCaret ? "1" : "0";
-        if (activeCaret) caretRef.current.style.transform = `translate(${activeCaret.x - 1.5}px, ${activeCaret.y}px)`;
+        caretRef.current.style.display = caretPosition ? "block" : "none";
+        caretRef.current.style.opacity = caretPosition ? "1" : "0";
+        if (caretPosition) caretRef.current.style.transform = `translate(${caretPosition.x - 1.5}px, ${caretPosition.y}px)`;
       }
 
       animationFrame = requestAnimationFrame(animate);

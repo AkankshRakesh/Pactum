@@ -148,8 +148,9 @@ export default function AuthPage() {
   const [name, setName] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [agreementOpen, setAgreementOpen] = useState(false);
-  const [done, setDone] = useState(false);
   const [oauthError, setOauthError] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const error = new URLSearchParams(window.location.search).get("error");
@@ -162,40 +163,48 @@ export default function AuthPage() {
   const isSignup = mode === "signup";
   const canSubmit = email && password && (!isSignup || (name && agreed));
 
-  if (done) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center bg-[#FAF6F2] pactum-body dark:bg-[#0F0708]">
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            backgroundImage:
-              "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(139,38,53,0.10), transparent)",
-          }}
-        />
-        <div className="relative max-w-110 px-8 text-center">
-          <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-full border border-[#8B2635]/40 bg-[#8B2635]/10 text-[28px] dark:border-[#C1445A]/40 dark:bg-[#C1445A]/12">
-            ✓
-          </div>
-          <div className="mb-4 text-[11px] font-medium uppercase tracking-[0.14em] text-[#8B2635] dark:text-[#C1445A]">
-            {isSignup ? "Registration complete" : "Welcome back"}
-          </div>
-          <h2 className="m-0 mb-3 pactum-display text-[32px] font-bold leading-[1.1] text-black dark:text-white">
-            {isSignup ? `You're in, ${name || "there"}.` : "Access granted."}
-          </h2>
-          <p className="mb-9 text-sm leading-[1.75] text-black/50 dark:text-white/45">
-            {isSignup
-              ? "Your Pactum account is ready. Start creating contracts that are legally binding from the moment both parties sign."
-              : "Your sealed instruments and active agreements are waiting."}
-          </p>
-          <button
-            onClick={() => router.push("/")}
-            className="rounded bg-[#C1445A] cursor-pointer px-9 py-3.5 pactum-body text-sm font-bold tracking-[0.04em] text-[#0F0708] transition-colors duration-180 hover:bg-[#E0637A]"
-          >
-            Enter Pactum →
-          </button>
-        </div>
-      </div>
-    );
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSubmit || submitting) return;
+
+    setAuthError("");
+    setSubmitting(true);
+
+    try {
+      const csrfResponse = await fetch(`${API_BASE}/api/auth/csrf/`, {
+        credentials: "include",
+      });
+      const { csrfToken } = await csrfResponse.json();
+      const username = email.split("@", 1)[0].replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 150) || "pactum-user";
+
+      const response = await fetch(`${API_BASE}/api/auth/${isSignup ? "signup" : "login"}/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify(
+          isSignup
+            ? { username, email, password, passwordConfirm: password }
+            : { identifier: email, password }
+        ),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        const fieldErrors = result.errors
+          ? Object.values(result.errors).flat().join(" ")
+          : result.detail;
+        throw new Error(fieldErrors || (isSignup ? "Unable to create account." : "Invalid email or password."));
+      }
+
+      router.replace("/dashboard");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : isSignup ? "Unable to create account." : "Unable to sign in.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
 
@@ -282,16 +291,12 @@ export default function AuthPage() {
               : "Sign in to access your sealed contracts and agreements."}
           </p>
           {oauthError && <p className="mt-3 pactum-body text-[13px] text-[#8B2635] dark:text-[#E0637A]">{oauthError}</p>}
+          {authError && <p className="mt-3 pactum-body text-[13px] text-[#8B2635] dark:text-[#E0637A]">{authError}</p>}
         </div>
 
           {/* form */}
           <form
-            onSubmit={e => {
-              e.preventDefault();
-              if (canSubmit) {
-                setDone(true);
-              }
-            }}
+            onSubmit={handleSubmit}
           >
             {/* SSO */}
             <button
@@ -366,15 +371,15 @@ export default function AuthPage() {
 
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || submitting}
               className={[
-                "mb-5 cursor-pointer w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
-                canSubmit
+                "mb-5 w-full rounded border py-3.5 pactum-body text-sm font-bold transition-all duration-180",
+                canSubmit && !submitting
                   ? "cursor-pointer border-[#C1445A] bg-[#C1445A] text-[#0F0708] hover:bg-[#E0637A]"
                   : "cursor-not-allowed border-black/[0.07] bg-black/3 text-black/20 dark:border-white/[0.07] dark:bg-white/5 dark:text-white/20",
               ].join(" ")}
             >
-              {isSignup ? "Create account" : "Sign in"}
+              {submitting ? "Signing in..." : isSignup ? "Create account" : "Sign in"}
             </button>
             
           </form>
