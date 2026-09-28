@@ -54,6 +54,51 @@ body {
 .pactum-body { font-family: 'DM Sans', Arial, sans-serif; }
 .pactum-display { font-family: 'Playfair Display', Georgia, serif; }
 
+.contract-loader {
+  --loader-paper: #fbf5ea;
+  --loader-paper-edge: #e9dcc3;
+  --loader-ink-dark: #6e3b22;
+  --loader-ink-mid: #8c5a34;
+  --loader-rule: #d8c4a0;
+  --loader-backdrop: #2a160d;
+  --loader-backdrop-bright: #4a2818;
+  --loader-label: #c9a57c;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  overflow: hidden;
+  background: var(--paper-dark);
+  color: var(--loader-label);
+  font-family: 'DM Sans', Arial, sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.dark .contract-loader {
+  --loader-paper: #fbf5ea;
+  --loader-paper-edge: #e9dcc3;
+  --loader-ink-dark: #6e3b22;
+  --loader-ink-mid: #8c5a34;
+  --loader-rule: #d8c4a0;
+  --loader-backdrop: #2a160d;
+  --loader-backdrop-bright: #4a2818;
+  --loader-label: #c9a57c;
+}
+.contract-loader__stage { width: min(60vw, 60vh, 340px); aspect-ratio: 1; flex: 0 1 auto; }
+.contract-loader__stage svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.contract-loader__label { margin: 0; font-size: 15px; letter-spacing: .02em; }
+.contract-loader__label > span span { animation: loader-dot-fade 1400ms ease-in-out infinite; opacity: .2; }
+.contract-loader__label > span span:nth-child(2) { animation-delay: 180ms; }
+.contract-loader__label > span span:nth-child(3) { animation-delay: 360ms; }
+@keyframes loader-dot-fade { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .contract-loader__label > span span { animation: none; opacity: .65; }
+}
+
 a { color: inherit; }
 
 /* ===================================================================

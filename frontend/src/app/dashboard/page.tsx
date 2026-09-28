@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import ContractLoader from "../ContractLoader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
@@ -65,11 +66,7 @@ export default function DashboardPage() {
   }
 
   if (checkingSession || !user) {
-    return (
-      <main className="dashboard-shell" aria-live="polite">
-        <p>Verifying party credentials...</p>
-      </main>
-    );
+    return <ContractLoader />;
   }
 
   return (
