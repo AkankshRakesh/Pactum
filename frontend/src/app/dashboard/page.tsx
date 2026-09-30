@@ -276,6 +276,7 @@ export default function Dashboard() {
             <div style={{ position: "absolute", top: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: P.accent, border: `2px solid ${P.surface}` }} />
           </div>
           <button
+            onClick={() => router.push("/new")}
             style={{
               padding: "7px 16px",
               background: P.accent, border: "none", borderRadius: 6,
