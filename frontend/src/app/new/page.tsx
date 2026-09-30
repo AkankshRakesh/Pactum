@@ -52,6 +52,8 @@ const styles = {
   enabled: "text-[#3c9b68]",
   modalBackdrop: "fixed inset-0 z-30 grid place-items-center bg-[#0f0708]/55 p-5 backdrop-blur-sm",
   inviteModal: "w-full max-w-[440px] rounded-xl border border-[#8b2635]/35 bg-[#faf6f2] p-7 shadow-[0_20px_70px_rgba(15,7,8,0.3)] dark:border-[#c1445a]/35 dark:bg-[#160b0c]",
+  clauseRail: "flex w-8 shrink-0 flex-col gap-3",
+  deleteClauseButton: "grid h-7 w-7 place-items-center rounded border border-transparent bg-transparent text-sm text-black/35 hover:border-[#8b2635]/40 hover:bg-[#8b2635]/10 hover:text-[#8b2635] dark:text-white/35 dark:hover:border-[#c1445a]/40 dark:hover:bg-[#c1445a]/10 dark:hover:text-[#e0637a]",
   modalHeader: "mb-6 flex items-start justify-between",
   closeButton: "border-0 bg-transparent text-2xl text-black/45 hover:text-[#8b2635] dark:text-white/45 dark:hover:text-[#e0637a]",
   formLabel: "mb-1.5 block text-[11px] font-bold",
@@ -78,6 +80,8 @@ export default function NewContractPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
   const [clauses, setClauses] = useState<number[]>([]);
+  const [clausePositions, setClausePositions] = useState<number[]>([]);
+  const skipNextEmptyRemoval = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -109,6 +113,71 @@ export default function NewContractPage() {
     window.setTimeout(() => setSavedState("Saved to Pactum"), 650);
   }
 
+  function removeClause(index: number) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    editor.querySelectorAll("ol > li")[index]?.remove();
+    setClauses(current => current.filter((_, clauseIndex) => clauseIndex !== index).map((_, clauseIndex) => clauseIndex + 1));
+    window.requestAnimationFrame(measureClausePositions);
+    setSavedState("Unsaved changes");
+  }
+
+  function measureClausePositions() {
+    const editor = editorRef.current;
+    const paper = editor?.parentElement;
+    if (!editor || !paper) return;
+
+    const paperTop = paper.getBoundingClientRect().top;
+    setClausePositions(Array.from(editor.querySelectorAll("ol > li"), item => item.getBoundingClientRect().top - paperTop));
+  }
+
+  function getActiveClause(target: EventTarget | null) {
+    const selectionNode = window.getSelection()?.anchorNode;
+    const selectionElement = selectionNode instanceof HTMLElement ? selectionNode : selectionNode?.parentElement;
+    return selectionElement?.closest("li") || (target as HTMLElement | null)?.closest("li");
+  }
+
+  function handleEditorInput(event: React.FormEvent<HTMLDivElement>) {
+    updateDocument();
+    if (skipNextEmptyRemoval.current) {
+      skipNextEmptyRemoval.current = false;
+      return;
+    }
+
+    const clause = getActiveClause(event.target);
+    if (!clause || clause.textContent?.trim()) return;
+
+    const items = Array.from(editorRef.current?.querySelectorAll("ol > li") || []);
+    const index = items.indexOf(clause);
+    if (index >= 0) removeClause(index);
+  }
+
+  function handleEditorKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Backspace") return;
+
+    const clause = getActiveClause(event.target);
+    if (!clause || clause.textContent?.trim()) return;
+
+    const items = Array.from(editorRef.current?.querySelectorAll("ol > li") || []);
+    const index = items.indexOf(clause);
+    if (index >= 0) {
+      event.preventDefault();
+      skipNextEmptyRemoval.current = true;
+      window.setTimeout(() => {
+        skipNextEmptyRemoval.current = false;
+      }, 0);
+      removeClause(index);
+    }
+  }
+
+  useEffect(() => {
+    measureClausePositions();
+    const handleResize = () => measureClausePositions();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [clauses]);
+
   function addClause() {
     const editor = editorRef.current;
     if (!editor) return;
@@ -132,6 +201,7 @@ export default function NewContractPage() {
     selection?.addRange(range);
     editor.focus();
     setSavedState("Unsaved changes");
+    window.requestAnimationFrame(measureClausePositions);
   }
 
   async function handleSignOut() {
@@ -211,13 +281,15 @@ export default function NewContractPage() {
         </aside>
 
         <section className={styles.canvas} aria-label="Contract document">
-          <div className={styles.paper}>
+          <div className="mx-auto flex w-full max-w-215 items-start gap-2">
+          <div className={`${styles.paper} flex-1`}>
             <div
               ref={editorRef}
               className={styles.document}
               contentEditable
               suppressContentEditableWarning
-              onInput={updateDocument}
+              onInput={handleEditorInput}
+              onKeyDown={handleEditorKeyDown}
               role="textbox"
               aria-multiline="true"
               spellCheck
@@ -228,6 +300,14 @@ export default function NewContractPage() {
               <hr className="my-7 border-0 border-t border-black/10 dark:border-white/10" />
               <ol className="min-h-105 list-decimal pl-7" />
             </div>
+          </div>
+          {clauses.length > 0 && (
+            <div className={`${styles.clauseRail} relative`} aria-label="Clause actions">
+              {clauses.map((clause, index) => (
+                <button key={clause} type="button" className={`${styles.deleteClauseButton} absolute left-0`} style={{ top: clausePositions[index] ?? 0 }} onClick={() => removeClause(index)} aria-label={`Delete clause ${clause}`} title={`Delete clause ${clause}`}>×</button>
+              ))}
+            </div>
+          )}
           </div>
         </section>
 
