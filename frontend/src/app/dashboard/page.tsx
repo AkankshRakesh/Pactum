@@ -628,7 +628,7 @@ export default function Dashboard() {
               <div
                 key={r.id}
                 style={{ cursor: contractsLoaded ? "pointer" : "default", position: "relative" }}
-                onClick={() => { if (contractsLoaded) router.push(`/new?contract=${r.id}`); }}
+                onClick={() => { if (contractsLoaded) router.push(`/contract/${r.id}`); }}
               >
                 {/* thumbnail */}
                 <div
@@ -698,7 +698,7 @@ export default function Dashboard() {
                   transition: "background 0.15s", alignItems: "center",
                   columnGap: isMobile ? 8 : 0,
                 }}
-                onClick={() => { if (contractsLoaded) router.push(`/new?contract=${r.id}`); }}
+                onClick={() => { if (contractsLoaded) router.push(`/contract/${r.id}`); }}
                 onMouseEnter={e => (e.currentTarget.style.background = dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
