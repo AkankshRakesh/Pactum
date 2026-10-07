@@ -1,4 +1,5 @@
 import json
+import hashlib
 import re
 import secrets
 from urllib.error import HTTPError, URLError
@@ -9,11 +10,16 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
+from django.db import transaction
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
+
+from .models import Contract, ContractInvitation
 
 
 CLAUSES = [
@@ -386,3 +392,189 @@ def current_user(request):
         return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
 
     return JsonResponse({"user": _user_data(request.user)})
+
+
+def _require_authenticated(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
+    return None
+
+
+def _clean_document_html(value):
+    html = str(value or "")
+    html = re.sub(r"<\s*(script|style)[^>]*>.*?<\s*/\s*\1\s*>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    html = re.sub(r"\s+on[a-z]+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"(href|src)\s*=\s*(['\"])\s*javascript:[^'\"]*\2", r"\1=\2#\2", html, flags=re.IGNORECASE)
+    return html[:200000]
+
+
+def _contract_data(contract, include_body=False):
+    data = {
+        "id": str(contract.id),
+        "title": contract.title,
+        "subtitle": contract.subtitle,
+        "status": contract.status,
+        "invitedEmail": contract.invited_email,
+        "createdAt": contract.created_at.isoformat(),
+        "updatedAt": contract.updated_at.isoformat(),
+        "sentAt": contract.sent_at.isoformat() if contract.sent_at else None,
+    }
+    if include_body:
+        data["bodyHtml"] = contract.body_html
+    return data
+
+
+@require_GET
+def contract_list(request):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    return JsonResponse({"contracts": [_contract_data(contract, include_body=True) for contract in request.user.contracts.all()]})
+
+
+@require_http_methods(["DELETE"])
+def contract_delete(request, contract_id):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    try:
+        contract = request.user.contracts.get(id=contract_id)
+    except (Contract.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+
+    contract.delete()
+    return JsonResponse({"deleted": str(contract_id)})
+
+
+@require_GET
+def contract_detail(request, contract_id):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    try:
+        contract = request.user.contracts.get(id=contract_id)
+    except (Contract.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+    return JsonResponse({"contract": _contract_data(contract, include_body=True)})
+
+
+@require_POST
+def contract_save(request):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    contract_id = data.get("id")
+    title = str(data.get("title", "Untitled contract")).strip()[:200] or "Untitled contract"
+    subtitle = str(data.get("subtitle", "")).strip()[:500]
+    body_html = _clean_document_html(data.get("bodyHtml", ""))
+
+    if contract_id:
+        try:
+            contract = request.user.contracts.get(id=contract_id)
+        except (Contract.DoesNotExist, ValueError):
+            return JsonResponse({"detail": "Contract not found."}, status=404)
+        if contract.status == Contract.Status.EXECUTED:
+            return JsonResponse({"detail": "Executed contracts cannot be edited."}, status=409)
+        contract.title = title
+        contract.subtitle = subtitle
+        contract.body_html = body_html
+        contract.save(update_fields=["title", "subtitle", "body_html", "updated_at"])
+    else:
+        contract = Contract.objects.create(
+            creator=request.user,
+            title=title,
+            subtitle=subtitle,
+            body_html=body_html,
+        )
+
+    return JsonResponse({"contract": _contract_data(contract, include_body=True)}, status=201 if not contract_id else 200)
+
+
+@require_POST
+def contract_invite(request):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    try:
+        contract = request.user.contracts.get(id=data.get("contractId"))
+    except (Contract.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+
+    email = str(data.get("email", "")).strip().lower()
+    if not email or "@" not in email:
+        return JsonResponse({"detail": "A valid invited-party email is required."}, status=400)
+
+    contract.invited_email = email
+    contract.save(update_fields=["invited_email", "updated_at"])
+    invitation, _ = ContractInvitation.objects.update_or_create(
+        contract=contract,
+        defaults={"email": email, "status": ContractInvitation.Status.PENDING},
+    )
+    return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}})
+
+
+@require_POST
+def contract_send(request):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    email = str(data.get("email", "")).strip().lower()
+    if not email or "@" not in email:
+        return JsonResponse({"detail": "A valid invited-party email is required."}, status=400)
+
+    with transaction.atomic():
+        contract_id = data.get("contractId")
+        if contract_id:
+            try:
+                contract = request.user.contracts.select_for_update().get(id=contract_id)
+            except (Contract.DoesNotExist, ValueError):
+                return JsonResponse({"detail": "Contract not found."}, status=404)
+        else:
+            contract = Contract(creator=request.user)
+
+        contract.title = str(data.get("title", contract.title or "Untitled contract")).strip()[:200] or "Untitled contract"
+        contract.subtitle = str(data.get("subtitle", "")).strip()[:500]
+        contract.body_html = _clean_document_html(data.get("bodyHtml", ""))
+        contract.invited_email = email
+        contract.status = Contract.Status.SENT
+        contract.sent_at = timezone.now()
+        contract.save()
+
+        raw_token = secrets.token_urlsafe(32)
+        invitation, _ = ContractInvitation.objects.update_or_create(
+            contract=contract,
+            defaults={
+                "email": email,
+                "status": ContractInvitation.Status.SENT,
+                "token_hash": hashlib.sha256(raw_token.encode()).hexdigest(),
+                "sent_at": timezone.now(),
+            },
+        )
+
+        send_mail(
+            subject=f"You are invited to review {contract.title}",
+            message=f"{request.user.username} invited you to review a contract on Pactum.",
+            from_email=None,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+
+    return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}}, status=201)

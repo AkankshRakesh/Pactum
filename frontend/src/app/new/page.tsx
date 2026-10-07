@@ -7,7 +7,8 @@ import ContractLoader from "../ContractLoader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
-type User = { username: string; email: string };
+type User = { id: number; username: string; email: string };
+type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string };
 type Format = "bold" | "italic" | "underline" | "insertUnorderedList";
 
 const styles = {
@@ -74,33 +75,63 @@ export default function NewContractPage() {
   const editorRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<User | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [contractId, setContractId] = useState<string | null>(null);
+  const [bodyToHydrate, setBodyToHydrate] = useState<string | undefined>(undefined);
   const [title, setTitle] = useState("Untitled contract");
   const [savedState, setSavedState] = useState("Saved to Pactum");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteMode, setInviteMode] = useState<"invite" | "send">("invite");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
+  const [inviteError, setInviteError] = useState("");
   const [clauses, setClauses] = useState<number[]>([]);
   const [clausePositions, setClausePositions] = useState<number[]>([]);
   const skipNextEmptyRemoval = useRef(false);
+  const serverSaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
-    fetch(`${API_BASE}/api/auth/me/`, { credentials: "include", signal: controller.signal })
-      .then(response => {
+    async function loadEditor() {
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/me/`, { credentials: "include", signal: controller.signal });
         if (!response.ok) throw new Error("unauthorized");
-        return response.json();
-      })
-      .then(result => {
-        setUser(result.user);
+        const result = await response.json();
+        const currentUser = result.user as User & { id: number };
+        setUser(currentUser);
+
+        const requestedId = new URLSearchParams(window.location.search).get("contract");
+        if (requestedId) {
+          const contractResponse = await fetch(`${API_BASE}/api/contracts/${requestedId}/`, { credentials: "include", signal: controller.signal });
+          if (!contractResponse.ok) throw new Error("contract_not_found");
+          const contractResult = await contractResponse.json();
+          const contract = contractResult.contract as ContractRecord;
+          setContractId(contract.id);
+          setTitle(contract.title);
+          setBodyToHydrate(contract.bodyHtml);
+          setSavedState("Saved to Pactum");
+        }
         setCheckingSession(false);
-      })
-      .catch(() => {
+      } catch {
         if (!controller.signal.aborted) router.replace("/auth");
-      });
+      }
+    }
+
+    loadEditor();
 
     return () => controller.abort();
   }, [router]);
+
+  useEffect(() => {
+    if (bodyToHydrate === undefined || !editorRef.current) return;
+    editorRef.current.innerHTML = bodyToHydrate;
+    setClauses(Array.from(editorRef.current.querySelectorAll("ol > li"), (_, index) => index + 1));
+    measureClausePositions();
+  }, [bodyToHydrate]);
+
+  useEffect(() => () => {
+    if (serverSaveTimer.current) window.clearTimeout(serverSaveTimer.current);
+  }, []);
 
   function runFormat(command: Format) {
     editorRef.current?.focus();
@@ -109,8 +140,51 @@ export default function NewContractPage() {
   }
 
   function updateDocument() {
-    setSavedState("Saving...");
-    window.setTimeout(() => setSavedState("Saved to Pactum"), 650);
+    setSavedState("Saving to Pactum...");
+    queueServerSave();
+  }
+
+  function queueServerSave(titleOverride = title) {
+    if (!editorRef.current) return;
+    if (serverSaveTimer.current) window.clearTimeout(serverSaveTimer.current);
+    serverSaveTimer.current = window.setTimeout(() => {
+      void saveContractToServer(titleOverride).catch(error => {
+        setSavedState(error instanceof Error ? error.message : "Unable to save to Pactum.");
+      });
+    }, 500);
+  }
+
+  async function getCsrfToken() {
+    const response = await fetch(`${API_BASE}/api/auth/csrf/`, { credentials: "include" });
+    const result = await response.json();
+    return result.csrfToken as string;
+  }
+
+  async function saveContractToServer(titleOverride = title) {
+    if (!editorRef.current) throw new Error("Editor is not ready.");
+    setSavedState("Saving to Pactum...");
+    const response = await fetch(`${API_BASE}/api/contracts/save/`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": await getCsrfToken() },
+      body: JSON.stringify({ id: contractId, title: titleOverride, subtitle: "", bodyHtml: editorRef.current.innerHTML }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Unable to save contract.");
+
+    const contract = result.contract as ContractRecord;
+    setContractId(contract.id);
+    window.history.replaceState({}, "", `/new?contract=${contract.id}`);
+    setSavedState("Saved to Pactum");
+    return contract;
+  }
+
+  async function handleSaveContract() {
+    try {
+      await saveContractToServer();
+    } catch (error) {
+      setSavedState(error instanceof Error ? error.message : "Unable to save contract.");
+    }
   }
 
   function removeClause(index: number) {
@@ -221,7 +295,38 @@ export default function NewContractPage() {
   function sendInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!inviteEmail.trim()) return;
-    setInviteSent(true);
+    setInviteError("");
+    void (async () => {
+      try {
+        const contract = await saveContractToServer();
+        const endpoint = inviteMode === "send" ? "/api/contracts/send/" : "/api/contracts/invite/";
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", "X-CSRFToken": await getCsrfToken() },
+          body: JSON.stringify({
+            contractId: contract.id,
+            title: contract.title,
+            subtitle: contract.subtitle,
+            bodyHtml: editorRef.current?.innerHTML || "",
+            email: inviteEmail.trim(),
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Unable to process invitation.");
+        setInviteSent(true);
+        if (inviteMode === "send") setSavedState("Sent to invited party");
+      } catch (error) {
+        setInviteError(error instanceof Error ? error.message : "Unable to process invitation.");
+      }
+    })();
+  }
+
+  function openInvite(mode: "invite" | "send") {
+    setInviteMode(mode);
+    setInviteSent(false);
+    setInviteError("");
+    setInviteOpen(true);
   }
 
   if (checkingSession || !user) return <ContractLoader />;
@@ -231,16 +336,16 @@ export default function NewContractPage() {
       <header className={styles.appBar}>
         <div className={styles.brandGroup}>
           <button className={styles.iconButton} type="button" onClick={() => router.push("/dashboard")} aria-label="Back to dashboard" title="Back to dashboard">←</button>
-          <div className={styles.brandMark}>P</div>
-          <div className={styles.brandName}>Pactum</div>
+          
         </div>
         <div className={styles.documentName}>
-          <input className={styles.documentTitleInput} value={title} onChange={event => { setTitle(event.target.value); setSavedState("Unsaved changes"); }} aria-label="Contract title" />
+            <input className={styles.documentTitleInput} value={title} onChange={event => { const nextTitle = event.target.value; setTitle(nextTitle); setSavedState("Saving to Pactum..."); queueServerSave(nextTitle); }} aria-label="Contract title" />
           <span className={styles.saveStatus}>{savedState}</span>
         </div>
         <div className={styles.appActions}>
-          <button className={styles.ghostButton} type="button" onClick={() => setInviteOpen(true)}>Invite party</button>
-          <button className={styles.primaryButton} type="button" onClick={() => setSavedState("Ready to send")}>Sign &amp; send</button>
+          <button className={styles.ghostButton} type="button" onClick={handleSaveContract}>Save contract</button>
+          <button className={styles.ghostButton} type="button" onClick={() => openInvite("invite")}>Invite party</button>
+          <button className={styles.primaryButton} type="button" onClick={() => openInvite("send")}>Sign &amp; send</button>
           <button className={styles.avatar} type="button" onClick={handleSignOut} title="Sign out">{user.username.slice(0, 1).toUpperCase()}</button>
         </div>
       </header>
@@ -264,7 +369,7 @@ export default function NewContractPage() {
         </div>
         <div className={styles.editorTools}>
           <button type="button" className={styles.textButton} onClick={addClause}>+ Clause</button>
-          <button type="button" className={styles.textButton} onClick={() => setInviteOpen(true)}>Comments</button>
+          <button type="button" className={styles.textButton} onClick={() => openInvite("invite")}>Comments</button>
         </div>
       </div>
 
@@ -315,7 +420,7 @@ export default function NewContractPage() {
           <p className={styles.eyebrow}>Parties</p>
           <div className={styles.partyCard}><div className={styles.partyAvatar}>C</div><div><strong className="block text-xs font-semibold">{user.username}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Creator · You</span></div><i className={styles.statusDot} /></div>
           <div className={styles.partyCard}><div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div><div><strong className="block text-xs font-semibold">Invite someone</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Second signer</span></div></div>
-          <button type="button" className={styles.inspectorAction} onClick={() => setInviteOpen(true)}>＋ Add invited party</button>
+          <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>
           <div className={styles.inspectorRule} />
           <p className={styles.eyebrow}>Document settings</p>
           <div className={styles.setting}><span>Signature order</span><strong>Any order</strong></div>
@@ -327,8 +432,8 @@ export default function NewContractPage() {
       {inviteOpen && (
         <div className={styles.modalBackdrop} onMouseDown={event => { if (event.target === event.currentTarget) setInviteOpen(false); }}>
           <section className={styles.inviteModal} role="dialog" aria-modal="true" aria-labelledby="invite-title">
-            <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Second signer</p><h2 id="invite-title" className="pactum-display m-0 text-[25px] font-bold">Invite a party</h2></div><button type="button" className={styles.closeButton} onClick={() => setInviteOpen(false)} aria-label="Close invite dialog">×</button></div>
-            {inviteSent ? <div className={styles.inviteSuccess}>Invitation staged for <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>They will receive a secure link to review and sign this contract.</p><button className={styles.primaryButton} type="submit">Send invitation</button></form>}
+            <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Second signer</p><h2 id="invite-title" className="pactum-display m-0 text-[25px] font-bold">{inviteMode === "send" ? "Sign & send contract" : "Invite a party"}</h2></div><button type="button" className={styles.closeButton} onClick={() => setInviteOpen(false)} aria-label="Close invite dialog">×</button></div>
+            {inviteSent ? <div className={styles.inviteSuccess}>{inviteMode === "send" ? "Contract sent to" : "Invitation staged for"} <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>{inviteMode === "send" ? "The contract will be saved and the invited party will receive a secure review link." : "They will receive a secure link to review and sign this contract after you send it."}</p>{inviteError && <p className="my-3 text-xs text-[#8b2635] dark:text-[#e0637a]">{inviteError}</p>}<button className={styles.primaryButton} type="submit">{inviteMode === "send" ? "Save and send" : "Add invited party"}</button></form>}
           </section>
         </div>
       )}

@@ -358,9 +358,32 @@ a { color: inherit; }
 /* ===================================================================
    Scrollbar + responsive
    =================================================================== */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--paper-dark); }
-::-webkit-scrollbar-thumb { background: var(--ink-faded); }
+   
+/* ─── thin scrollbars, sitewide ─────────────────────────────── */
+
+/* Chrome, Edge, Safari */
+*::-webkit-scrollbar {
+  height: 6px;   /* horizontal scrollbar thickness */
+  width: 6px;    /* vertical scrollbar thickness (remove if you only want to change horizontal) */
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.35);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.6);
+}
+
+/* Firefox, and any browser without ::-webkit-scrollbar support */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.4) transparent;
+  }
+}
 
 @media (max-width: 900px) {
   .splash {

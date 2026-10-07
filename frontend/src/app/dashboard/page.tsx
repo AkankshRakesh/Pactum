@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ContractLoader from "../ContractLoader";
 
@@ -86,14 +86,68 @@ function ThumbRetainer() {
 }
 
 /* ─── recent contract thumbnails ─────────────────────────────────── */
-function ContractThumb({ color, title }: { color: string; title?: string }) {
+const PAGE_W = 794; // match your editor's page width (A4 @ 96dpi)
+const PAGE_H = 1123;
+
+function ContractPreview({ bodyHtml }: { bodyHtml?: string }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.38);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setScale(entry.contentRect.width / PAGE_W);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const srcDoc = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #fffdfb; }
+  body {
+    box-sizing: border-box;
+    width: ${PAGE_W}px;
+    padding: 56px 64px;
+    color: #1a0f10;
+    font-family: 'DM Sans', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+  img { max-width: 100%; }
+  table { border-collapse: collapse; max-width: 100%; }
+</style>
+</head>
+<body>${bodyHtml ?? ""}</body>
+</html>`;
+
   return (
-    <div style={{ width: "100%", height: "100%", background: color, display: "flex", flexDirection: "column", padding: 14, position: "relative" }}>
-      {title && <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 10, fontWeight: 700, color: "#fff", opacity: 0.7, marginBottom: 6 }}>{title}</div>}
-      {[1,2,3,4,5].map(i => (
-        <div key={i} style={{ height: 2.5, borderRadius: 1, background: "rgba(255,255,255,0.15)", marginBottom: 5, width: i === 5 ? "45%" : i === 3 ? "80%" : "100%" }} />
-      ))}
-      <div style={{ position: "absolute", bottom: 10, right: 10, width: 20, height: 20, borderRadius: "50%", background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9 }}>✦</div>
+    <div
+      ref={wrapRef}
+      aria-hidden
+      style={{ width: "100%", height: "100%", overflow: "hidden", position: "relative", background: "#fffdfb" }}
+    >
+      <iframe
+        title="Contract preview"
+        srcDoc={srcDoc}
+        sandbox=""            /* no scripts, no same-origin access */
+        loading="lazy"
+        tabIndex={-1}
+        scrolling="no"
+        style={{
+          position: "absolute", top: 0, left: 0,
+          width: PAGE_W, height: PAGE_H,
+          border: 0,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+          pointerEvents: "none",   // clicks go to the card, not the iframe
+        }}
+      />
     </div>
   );
 }
@@ -119,7 +173,21 @@ const recents = [
 
 const TABS = ["Recently viewed", "Shared contracts", "Archived"];
 
+function useViewport() {
+  const [width, setWidth] = useState(1280);
+  useEffect(() => {
+    const update = () => setWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return { isMobile: width < 640, isTablet: width < 1024 }; // isTablet is also true on mobile
+}
+
 export default function Dashboard() {
+  const { isMobile, isTablet } = useViewport();
+  const LIST_COLS = isMobile ? "1fr 32px" : isTablet ? "1fr 140px 32px" : "1fr 160px 160px 100px 32px";
+  const LIST_HEADERS = isMobile ? ["Name"] : isTablet ? ["Name", "Last edited"] : ["Name", "Contract ID", "Last edited", "Type"];
   const router = useRouter();
   const [user, setUser] = useState<{ username: string; email: string } | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -130,6 +198,8 @@ export default function Dashboard() {
   const [filterOrg, setFilterOrg]     = useState("All clients");
   const [filterType, setFilterType]   = useState("All types");
   const [search, setSearch]           = useState("");
+  const [savedContracts, setSavedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string }>>([]);
+  const [contractsLoaded, setContractsLoaded] = useState(false);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -150,6 +220,25 @@ export default function Dashboard() {
       })
       .then(result => {
         setUser(result.user);
+        return fetch(`${API_BASE}/api/contracts/`, { credentials: "include", signal: controller.signal });
+      })
+      .then(response => {
+        if (!response) return null;
+        if (!response.ok) throw new Error("contracts_unavailable");
+        return response.json();
+      })
+      .then(result => {
+        if (result?.contracts) {
+          setSavedContracts(result.contracts.map((contract: { id: string; title: string; updatedAt: string; status: string; bodyHtml?: string }) => ({
+            id: contract.id,
+            title: contract.title,
+            edited: new Date(contract.updatedAt).toLocaleDateString(),
+            color: contract.status === "sent" ? "#2A1117" : "#F0EBE3",
+            dark: contract.status === "sent",
+            bodyHtml: contract.bodyHtml,
+          })));
+        }
+        setContractsLoaded(true);
         setCheckingSession(false);
       })
       .catch(() => {
@@ -171,6 +260,20 @@ export default function Dashboard() {
     } finally {
       router.replace("/");
     }
+  }
+
+  async function handleDeleteContract(id: string) {
+    if (!window.confirm("Delete this contract permanently?")) return;
+
+    const csrfToken = await fetch(`${API_BASE}/api/auth/csrf/`, { credentials: "include" })
+      .then(response => response.json())
+      .then(result => result.csrfToken as string);
+    const response = await fetch(`${API_BASE}/api/contracts/${id}/delete/`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-CSRFToken": csrfToken },
+    });
+    if (response.ok) setSavedContracts(current => current.filter(contract => contract.id !== id));
   }
 
   if (checkingSession || !user) return <ContractLoader />;
@@ -207,7 +310,7 @@ export default function Dashboard() {
     "--d-sidebar":       "#F0E8E4",
   };
 
-  const filteredRecents = recents.filter(r =>
+  const filteredRecents = savedContracts.filter(r =>
     search === "" || r.title.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -216,7 +319,7 @@ export default function Dashboard() {
       id="dash-root"
       style={{
         ...(cssVars as React.CSSProperties),
-        minHeight: "100vh",
+        minHeight: "100dvh",
         background: P.bg,
         fontFamily: "'DM Sans', Arial, sans-serif",
         color: P.text,
@@ -227,16 +330,16 @@ export default function Dashboard() {
     >
 
       {/* ── TOP BAR ── */}
-      <header style={{
-        height: 56, flexShrink: 0,
-        display: "flex", alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 24px",
-        background: P.surface,
-        borderBottom: `1px solid ${P.border}`,
-      }}>
-        {/* wordmark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <header style={{
+          minHeight: 56, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: isMobile ? 10 : 0,
+          padding: isMobile ? "10px 16px" : "0 24px",
+          background: P.surface,
+          borderBottom: `1px solid ${P.border}`,
+        }}>
+          {/* wordmark */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, order: 1 }}>
           <div style={{
             width: 28, height: 28,
             background: P.accentMuted,
@@ -250,7 +353,13 @@ export default function Dashboard() {
         </div>
 
         {/* search */}
-        <div style={{ flex: 1, maxWidth: 440, margin: "0 32px", position: "relative" }}>
+         <div style={{
+            flex: 1, position: "relative",
+            maxWidth: isMobile ? "none" : 440,
+            margin: isMobile ? 0 : isTablet ? "0 16px" : "0 32px",
+            order: isMobile ? 3 : 2,
+            flexBasis: isMobile ? "100%" : "auto",
+          }}>
           <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: P.textMuted, fontSize: 14, pointerEvents: "none" }}>⌕</span>
           <input
             value={search}
@@ -270,7 +379,7 @@ export default function Dashboard() {
         </div>
 
         {/* right */}
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, order: isMobile ? 2 : 3 }}>
           <div style={{ position: "relative", cursor: "pointer", fontSize: 18 }}>
             🔔
             <div style={{ position: "absolute", top: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: P.accent, border: `2px solid ${P.surface}` }} />
@@ -305,7 +414,7 @@ export default function Dashboard() {
       </header>
 
       {/* ── MAIN SCROLL AREA ── */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px 48px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px 16px 32px" : isTablet ? "24px 24px 40px" : "28px 32px 48px" }}>
 
         {/* ── RECOMMENDED TEMPLATES PANEL ── */}
         {showBanner && (
@@ -313,7 +422,7 @@ export default function Dashboard() {
             background: P.card,
             border: `1px solid ${P.borderStrong}`,
             borderRadius: 10,
-            padding: "20px 24px",
+            padding: isMobile ? "16px" : "20px 24px",
             marginBottom: 32,
           }}>
             {/* panel header */}
@@ -341,11 +450,16 @@ export default function Dashboard() {
             </div>
 
             {/* template cards row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+            <div style={isMobile ? {
+              display: "flex", gap: 12, overflowX: "auto", scrollSnapType: "x mandatory",
+              margin: "0 -16px", padding: "0 16px 4px",
+            } : {
+              display: "grid", gridTemplateColumns: isTablet ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 14,
+            }}>
               {templates.map(t => (
                 <div
                   key={t.id}
-                  style={{ cursor: "pointer" }}
+                  style={{ cursor: "pointer", ...(isMobile && { flex: "0 0 220px", scrollSnapAlign: "start" }) }}
                   onMouseEnter={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "0.85"}
                   onMouseLeave={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "1"}
                 >
@@ -398,9 +512,15 @@ export default function Dashboard() {
 
         {/* ── FILE BROWSER ── */}
         {/* toolbar row */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          {/* tabs */}
-          <div style={{ display: "flex", gap: 0 }}>
+        <div style={{
+          display: "flex",
+          flexDirection: isTablet ? "column" : "row",
+          alignItems: isTablet ? "stretch" : "center",
+          justifyContent: "space-between",
+          gap: 12, marginBottom: 16,
+        }}>
+          {/* tabs: scroll instead of overflowing */}
+          <div style={{ display: "flex", gap: 0, overflowX: "auto", whiteSpace: "nowrap" }}>
             {TABS.map((tab, i) => (
               <button
                 key={tab}
@@ -421,7 +541,7 @@ export default function Dashboard() {
           </div>
 
           {/* right controls */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {/* org filter */}
             <select
               value={filterOrg}
@@ -475,7 +595,7 @@ export default function Dashboard() {
             </select>
 
             {/* view toggle */}
-            <div style={{ display: "flex", border: `1px solid ${P.border}`, borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ display: "flex", border: `1px solid ${P.border}`, borderRadius: 6, overflow: "hidden", marginLeft: isTablet ? "auto" : 0 }}>
               {(["grid","list"] as const).map(mode => (
                 <button
                   key={mode}
@@ -499,11 +619,16 @@ export default function Dashboard() {
 
         {/* grid */}
         {viewMode === "grid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(200px, 1fr))",
+            gap: isMobile ? 12 : 16,
+          }}>
             {filteredRecents.map(r => (
               <div
                 key={r.id}
-                style={{ cursor: "pointer" }}
+                style={{ cursor: contractsLoaded ? "pointer" : "default", position: "relative" }}
+                onClick={() => { if (contractsLoaded) router.push(`/new?contract=${r.id}`); }}
               >
                 {/* thumbnail */}
                 <div
@@ -525,8 +650,9 @@ export default function Dashboard() {
                     (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
                   }}
                 >
-                  <ContractThumb color={r.color} title={r.dark ? undefined : r.title} />
+                  <ContractPreview bodyHtml={"bodyHtml" in r && typeof r.bodyHtml === "string" ? r.bodyHtml : undefined} />
                 </div>
+                {contractsLoaded && <button type="button" onClick={event => { event.stopPropagation(); void handleDeleteContract(r.id); }} title="Delete contract" aria-label={`Delete ${r.title}`} style={{ position: "absolute", top: 8, right: 8, border: 0, background: P.surface, color: P.textMuted, cursor: "pointer", width: 24, height: 24, borderRadius: 4 }}>×</button>}
 
                 {/* file info row */}
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -554,33 +680,58 @@ export default function Dashboard() {
         ) : (
           /* list view */
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {/* list header */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 160px 100px", padding: "8px 12px", borderBottom: `1px solid ${P.border}` }}>
-              {["Name", "Contract ID", "Last edited", "Type"].map(h => (
+            {/* header */}
+            <div style={{ display: "grid", gridTemplateColumns: LIST_COLS, padding: "8px 12px", borderBottom: `1px solid ${P.border}` }}>
+              {LIST_HEADERS.map(h => (
                 <div key={h} style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: P.textMuted }}>{h}</div>
               ))}
+              <div />
             </div>
+
             {filteredRecents.map(r => (
               <div
                 key={r.id}
                 style={{
-                  display: "grid", gridTemplateColumns: "1fr 160px 160px 100px",
-                  padding: "11px 12px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  transition: "background 0.15s",
-                  alignItems: "center",
+                  display: "grid", gridTemplateColumns: LIST_COLS,
+                  padding: "11px 12px", borderRadius: 6,
+                  cursor: contractsLoaded ? "pointer" : "default",
+                  transition: "background 0.15s", alignItems: "center",
+                  columnGap: isMobile ? 8 : 0,
                 }}
+                onClick={() => { if (contractsLoaded) router.push(`/new?contract=${r.id}`); }}
                 onMouseEnter={e => (e.currentTarget.style.background = dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 4, background: r.color, border: `1px solid ${P.border}`, flexShrink: 0 }} />
-                  <span style={{ fontSize: 13, fontWeight: 500, color: P.text }}>{r.title}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: P.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.title}</div>
+                    {isMobile && <div style={{ fontSize: 11, color: P.textMuted }}>Edited {r.edited}</div>}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, fontFamily: "'Courier Prime', monospace", color: P.textMuted }}>{r.id}</div>
-                <div style={{ fontSize: 12, color: P.textMuted }}>Edited {r.edited}</div>
-                <div style={{ fontSize: 11, color: P.accent, background: P.accentMuted, padding: "2px 8px", borderRadius: 4, display: "inline-block", width: "fit-content" }}>Contract</div>
+
+                {!isTablet && <div style={{ fontSize: 12, fontFamily: "'Courier Prime', monospace", color: P.textMuted, overflow: "hidden", textOverflow: "ellipsis" }}>{r.id}</div>}
+                {!isMobile && <div style={{ fontSize: 12, color: P.textMuted }}>Edited {r.edited}</div>}
+                {!isTablet && <div style={{ fontSize: 11, color: P.accent, background: P.accentMuted, padding: "2px 8px", borderRadius: 4, display: "inline-block", width: "fit-content" }}>Contract</div>}
+
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  {contractsLoaded && (
+                    <button
+                      type="button"
+                      onClick={event => { event.stopPropagation(); void handleDeleteContract(r.id); }}
+                      title="Delete contract"
+                      aria-label={`Delete ${r.title}`}
+                      style={{
+                        border: 0, background: "transparent", color: P.textMuted, cursor: "pointer",
+                        width: 24, height: 24, borderRadius: 4, fontSize: 18, lineHeight: 1,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "color 0.15s, background 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = P.accent; e.currentTarget.style.background = P.accentMuted; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = P.textMuted; e.currentTarget.style.background = "transparent"; }}
+                    >×</button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

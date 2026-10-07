@@ -13,5 +13,11 @@ urlpatterns = [
     path("api/auth/me/", views.current_user, name="current-user"),
     path("api/auth/google/start/", views.google_start, name="google-start"),
     path("api/auth/google/callback/", views.google_callback, name="google-callback"),
+    path("api/contracts/", views.contract_list, name="contract-list"),
+    path("api/contracts/save/", views.contract_save, name="contract-save"),
+    path("api/contracts/send/", views.contract_send, name="contract-send"),
+    path("api/contracts/invite/", views.contract_invite, name="contract-invite"),
+    path("api/contracts/<uuid:contract_id>/delete/", views.contract_delete, name="contract-delete"),
+    path("api/contracts/<uuid:contract_id>/", views.contract_detail, name="contract-detail"),
     path("", views.home, name="home"),
 ]
