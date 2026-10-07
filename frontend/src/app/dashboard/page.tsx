@@ -340,13 +340,7 @@ export default function Dashboard() {
         }}>
           {/* wordmark */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, order: 1 }}>
-          <div style={{
-            width: 28, height: 28,
-            background: P.accentMuted,
-            border: `1px solid ${P.accentBorder}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 13, color: P.accent, fontWeight: 700,
-          }}>P</div>
+          <img src="/logo.png" alt="Pactum logo" style={{ width: 28, height: 28 }} />
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: P.text, letterSpacing: "-0.01em" }}>
             PACTUM
           </span>
