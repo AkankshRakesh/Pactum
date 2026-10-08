@@ -155,7 +155,7 @@ export default function AuthPage() {
   useEffect(() => {
     const error = new URLSearchParams(window.location.search).get("error");
     if (error) {
-      setOauthError("Google sign-in could not be completed. Please try again.");
+      window.setTimeout(() => setOauthError("Google sign-in could not be completed. Please try again."), 0);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -199,7 +199,8 @@ export default function AuthPage() {
         throw new Error(fieldErrors || (isSignup ? "Unable to create account." : "Invalid email or password."));
       }
 
-      router.replace("/dashboard");
+      const nextPath = new URLSearchParams(window.location.search).get("next");
+      router.replace(nextPath?.startsWith("/") ? nextPath : "/dashboard");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : isSignup ? "Unable to create account." : "Unable to sign in.");
     } finally {
@@ -299,9 +300,8 @@ export default function AuthPage() {
             onSubmit={handleSubmit}
           >
             {/* SSO */}
-            <button
-              type="button"
-              onClick={() => window.location.assign(`${API_BASE}/api/auth/google/start/`)}
+            <a
+              href={`${API_BASE}/api/auth/google/start/`}
               className="cursor-pointer flex w-full items-center justify-center gap-2.5 rounded border border-black/10 bg-transparent py-3 pactum-body text-[13px] font-medium text-black/60 transition-all duration-180 hover:border-black/20 hover:text-black dark:border-white/10 dark:text-white/60 dark:hover:border-white/20 dark:hover:text-white"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -323,7 +323,7 @@ export default function AuthPage() {
                 />
               </svg>
               Continue with Google
-            </button>
+            </a>
 
             {/* divider */}
             <div className="my-5 flex items-center gap-3">

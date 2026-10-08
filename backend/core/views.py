@@ -2,6 +2,7 @@ import json
 import hashlib
 import re
 import secrets
+from datetime import timedelta
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -409,19 +410,61 @@ def _clean_document_html(value):
 
 
 def _contract_data(contract, include_body=False):
+    invitation = ContractInvitation.objects.filter(contract=contract).first()
+    active_invited_email = contract.invited_email if invitation and invitation.status != ContractInvitation.Status.REVOKED else ""
     data = {
         "id": str(contract.id),
         "title": contract.title,
         "subtitle": contract.subtitle,
         "status": contract.status,
-        "invitedEmail": contract.invited_email,
+        "invitedEmail": active_invited_email,
         "createdAt": contract.created_at.isoformat(),
         "updatedAt": contract.updated_at.isoformat(),
         "sentAt": contract.sent_at.isoformat() if contract.sent_at else None,
+        "invitationStatus": invitation.status if invitation else "",
+        "invitedSignerName": invitation.signer_name if invitation else "",
     }
     if include_body:
         data["bodyHtml"] = contract.body_html
     return data
+
+
+def _invitation_url(raw_token):
+    return f"{settings.FRONTEND_URL}/invite/{raw_token}"
+
+
+def _issue_invitation(contract, email):
+    raw_token = secrets.token_urlsafe(32)
+    now = timezone.now()
+    invitation, _ = ContractInvitation.objects.update_or_create(
+        contract=contract,
+        defaults={
+            "email": email,
+            "status": ContractInvitation.Status.SENT,
+            "token_hash": hashlib.sha256(raw_token.encode()).hexdigest(),
+            "expires_at": now + timedelta(days=7),
+            "revoked_at": None,
+            "accepted_at": None,
+            "signed_at": None,
+            "signer_name": "",
+            "signer_user": None,
+            "signature_mode": "",
+            "sent_at": now,
+        },
+    )
+    return invitation, raw_token
+
+
+def _get_active_invitation(token):
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    invitation = ContractInvitation.objects.select_related("contract", "contract__creator").filter(token_hash=token_hash).first()
+    if not invitation:
+        return None
+    if invitation.status in {ContractInvitation.Status.REVOKED, ContractInvitation.Status.ACCEPTED}:
+        return None
+    if invitation.expires_at and invitation.expires_at <= timezone.now():
+        return None
+    return invitation
 
 
 @require_GET
@@ -517,12 +560,21 @@ def contract_invite(request):
     if not email or "@" not in email:
         return JsonResponse({"detail": "A valid invited-party email is required."}, status=400)
 
-    contract.invited_email = email
-    contract.save(update_fields=["invited_email", "updated_at"])
-    invitation, _ = ContractInvitation.objects.update_or_create(
-        contract=contract,
-        defaults={"email": email, "status": ContractInvitation.Status.PENDING},
-    )
+    with transaction.atomic():
+        contract.invited_email = email
+        contract.save(update_fields=["invited_email", "updated_at"])
+        invitation, raw_token = _issue_invitation(contract, email)
+        send_mail(
+            subject=f"You are invited to review {contract.title}",
+            message=(
+                f"{request.user.username} invited you to review a contract on Pactum.\n\n"
+                f"Open this secure link to review and sign: {_invitation_url(raw_token)}\n"
+                "This link expires in 7 days and can be revoked by the creator."
+            ),
+            from_email=None,
+            recipient_list=[email],
+            fail_silently=False,
+        )
     return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}})
 
 
@@ -558,23 +610,96 @@ def contract_send(request):
         contract.sent_at = timezone.now()
         contract.save()
 
-        raw_token = secrets.token_urlsafe(32)
-        invitation, _ = ContractInvitation.objects.update_or_create(
-            contract=contract,
-            defaults={
-                "email": email,
-                "status": ContractInvitation.Status.SENT,
-                "token_hash": hashlib.sha256(raw_token.encode()).hexdigest(),
-                "sent_at": timezone.now(),
-            },
-        )
+        invitation, raw_token = _issue_invitation(contract, email)
 
         send_mail(
             subject=f"You are invited to review {contract.title}",
-            message=f"{request.user.username} invited you to review a contract on Pactum.",
+            message=(
+                f"{request.user.username} invited you to review a contract on Pactum.\n\n"
+                f"Open this secure link to review and sign: {_invitation_url(raw_token)}\n"
+                "This link expires in 7 days and can be revoked by the creator."
+            ),
             from_email=None,
             recipient_list=[email],
             fail_silently=False,
         )
 
     return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}}, status=201)
+
+
+@require_POST
+def contract_invitation_revoke(request, contract_id):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    try:
+        contract = request.user.contracts.get(id=contract_id)
+        invitation = contract.invitation
+    except (Contract.DoesNotExist, ContractInvitation.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Invitation not found."}, status=404)
+
+    invitation.status = ContractInvitation.Status.REVOKED
+    invitation.revoked_at = timezone.now()
+    invitation.token_hash = ""
+    invitation.save(update_fields=["status", "revoked_at", "token_hash"])
+    return JsonResponse({"contract": _contract_data(contract), "invitation": {"status": invitation.status}})
+
+
+@require_GET
+def invitation_detail(request, token):
+    invitation = _get_active_invitation(token)
+    if not invitation:
+        return JsonResponse({"detail": "This invitation is invalid, expired, or revoked."}, status=404)
+
+    return JsonResponse({
+        "invitation": {
+            "email": invitation.email,
+            "status": invitation.status,
+            "expiresAt": invitation.expires_at.isoformat() if invitation.expires_at else None,
+            "creator": invitation.contract.creator.username,
+        },
+        "contract": _contract_data(invitation.contract, include_body=True),
+    })
+
+
+@require_POST
+def invitation_sign(request, token):
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    invitation = _get_active_invitation(token)
+    if not invitation:
+        return JsonResponse({"detail": "This invitation is invalid, expired, or revoked."}, status=404)
+
+    mode = str(data.get("mode", "guest")).strip().lower()
+    signer_user = None
+    if mode == "account":
+        if not request.user.is_authenticated:
+            return JsonResponse({"detail": "Sign in to sign this contract with your account."}, status=401)
+        if request.user.email.strip().lower() != invitation.email.strip().lower():
+            return JsonResponse({"detail": "This account email does not match the invited email."}, status=403)
+        signer_user = request.user
+        signer_name = request.user.get_full_name().strip() or request.user.username
+    elif mode == "guest":
+        signer_name = str(data.get("signerName", "")).strip()[:200]
+        if not signer_name:
+            return JsonResponse({"detail": "Your name is required to sign as a guest."}, status=400)
+    else:
+        return JsonResponse({"detail": "Invalid signing mode."}, status=400)
+
+    now = timezone.now()
+    with transaction.atomic():
+        invitation.status = ContractInvitation.Status.ACCEPTED
+        invitation.accepted_at = now
+        invitation.signed_at = now
+        invitation.signer_name = signer_name
+        invitation.signer_user = signer_user
+        invitation.signature_mode = mode
+        invitation.token_hash = ""
+        invitation.save(update_fields=["status", "accepted_at", "signed_at", "signer_name", "signer_user", "signature_mode", "token_hash"])
+        invitation.contract.status = Contract.Status.EXECUTED
+        invitation.contract.save(update_fields=["status", "updated_at"])
+
+    return JsonResponse({"detail": "Contract signed successfully.", "status": "accepted"})

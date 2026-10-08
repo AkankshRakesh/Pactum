@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import ContractLoader from "../app/ContractLoader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
 type User = { id: number; username: string; email: string };
-type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string };
+type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string };
 type Format = "bold" | "italic" | "underline" | "insertUnorderedList";
 
 const styles = {
@@ -76,6 +76,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [user, setUser] = useState<User | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [contractId, setContractId] = useState<string | null>(null);
+  const [invitedEmail, setInvitedEmail] = useState("");
+  const [invitationStatus, setInvitationStatus] = useState("");
   const [bodyToHydrate, setBodyToHydrate] = useState<string | undefined>(undefined);
   const [title, setTitle] = useState("Untitled contract");
   const [savedState, setSavedState] = useState("Saved to Pactum");
@@ -108,6 +110,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           const contract = contractResult.contract as ContractRecord;
           setContractId(contract.id);
           setTitle(contract.title);
+          setInvitedEmail(contract.invitedEmail || "");
+          setInvitationStatus(contract.invitationStatus || "");
           setBodyToHydrate(contract.bodyHtml);
           setSavedState("Saved to Pactum");
         }
@@ -120,7 +124,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     loadEditor();
 
     return () => controller.abort();
-  }, [router]);
+  }, [router, routeContractId]);
 
   useEffect(() => {
     if (bodyToHydrate === undefined || !editorRef.current) return;
@@ -180,6 +184,10 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   }
 
   async function handleSaveContract() {
+    if (serverSaveTimer.current) {
+      window.clearTimeout(serverSaveTimer.current);
+      serverSaveTimer.current = null;
+    }
     try {
       await saveContractToServer();
     } catch (error) {
@@ -278,20 +286,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     window.requestAnimationFrame(measureClausePositions);
   }
 
-  async function handleSignOut() {
-    try {
-      const csrfResponse = await fetch(`${API_BASE}/api/auth/csrf/`, { credentials: "include" });
-      const { csrfToken } = await csrfResponse.json();
-      await fetch(`${API_BASE}/api/auth/logout/`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-      });
-    } finally {
-      router.replace("/");
-    }
-  }
-
+  
   function sendInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!inviteEmail.trim()) return;
@@ -315,6 +310,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || "Unable to process invitation.");
         setInviteSent(true);
+        setInvitedEmail(inviteEmail.trim());
+        setInvitationStatus("sent");
         if (inviteMode === "send") setSavedState("Sent to invited party");
       } catch (error) {
         setInviteError(error instanceof Error ? error.message : "Unable to process invitation.");
@@ -328,6 +325,42 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     setInviteError("");
     setInviteOpen(true);
   }
+
+  async function revokeInvitation() {
+    if (!contractId || !window.confirm("Invalidate this invitation link?")) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/contracts/${contractId}/invitation/revoke/`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "X-CSRFToken": await getCsrfToken() },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Unable to revoke invitation.");
+      setInvitedEmail("");
+      setInvitationStatus("revoked");
+      setSavedState("Invitation link revoked");
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "Unable to revoke invitation.");
+    }
+  }
+
+  const saveShortcutRef = useRef<() => void>(() => {});
+
+  // keep the ref pointing at the latest handler (fresh contractId / title)
+  useEffect(() => {
+    saveShortcutRef.current = () => { void handleSaveContract(); };
+  });
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const isSave = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "s";
+      if (!isSave) return;
+      event.preventDefault();               // stop the browser's "Save page as..." dialog
+      if (!event.repeat) saveShortcutRef.current();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   if (checkingSession || !user) return <ContractLoader />;
 
@@ -345,7 +378,6 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         <div className={styles.appActions}>
           <button className={styles.ghostButton} type="button" onClick={handleSaveContract}>Save contract</button>
           <button className={styles.ghostButton} type="button" onClick={() => openInvite("invite")}>Invite party</button>
-          <button className={styles.primaryButton} type="button" onClick={() => openInvite("send")}>Sign &amp; send</button>
         </div>
       </header>
 
@@ -418,8 +450,16 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         <aside className={styles.inspector}>
           <p className={styles.eyebrow}>Parties</p>
           <div className={styles.partyCard}><div className={styles.partyAvatar}>C</div><div><strong className="block text-xs font-semibold">{user.username}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Creator · You</span></div><i className={styles.statusDot} /></div>
-          <div className={styles.partyCard}><div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div><div><strong className="block text-xs font-semibold">Invite someone</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Second signer</span></div></div>
-          <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>
+          {invitedEmail ? (
+            <div className={styles.partyCard}>
+              <div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div>
+              <div className="min-w-0 flex-1"><strong className="block truncate text-xs font-semibold">{invitedEmail}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">{invitationStatus === "accepted" ? "Signed" : invitationStatus === "revoked" ? "Revoked" : "Pending"}</span></div>
+              {invitationStatus !== "accepted" && invitationStatus !== "revoked" && <button type="button" className="border-0 bg-transparent px-1 text-lg text-black/40 hover:text-[#8b2635] dark:text-white/40 dark:hover:text-[#e0637a]" onClick={revokeInvitation} title="Invalidate invitation link" aria-label="Invalidate invitation link">×</button>}
+            </div>
+          ) : (
+            <div className={styles.partyCard}><div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div><div><strong className="block text-xs font-semibold">Invite someone</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Second signer</span></div></div>
+          )}
+          {!invitedEmail && <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>}
           <div className={styles.inspectorRule} />
           <p className={styles.eyebrow}>Document settings</p>
           <div className={styles.setting}><span>Signature order</span><strong>Any order</strong></div>
@@ -432,7 +472,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         <div className={styles.modalBackdrop} onMouseDown={event => { if (event.target === event.currentTarget) setInviteOpen(false); }}>
           <section className={styles.inviteModal} role="dialog" aria-modal="true" aria-labelledby="invite-title">
             <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Second signer</p><h2 id="invite-title" className="pactum-display m-0 text-[25px] font-bold">{inviteMode === "send" ? "Sign & send contract" : "Invite a party"}</h2></div><button type="button" className={styles.closeButton} onClick={() => setInviteOpen(false)} aria-label="Close invite dialog">×</button></div>
-            {inviteSent ? <div className={styles.inviteSuccess}>{inviteMode === "send" ? "Contract sent to" : "Invitation staged for"} <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>{inviteMode === "send" ? "The contract will be saved and the invited party will receive a secure review link." : "They will receive a secure link to review and sign this contract after you send it."}</p>{inviteError && <p className="my-3 text-xs text-[#8b2635] dark:text-[#e0637a]">{inviteError}</p>}<button className={styles.primaryButton} type="submit">{inviteMode === "send" ? "Save and send" : "Add invited party"}</button></form>}
+            {inviteSent ? <div className={styles.inviteSuccess}>{inviteMode === "send" ? "Contract sent to" : "Invitation sent to"} <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>{inviteMode === "send" ? "The contract will be saved and the invited party will receive a secure review link." : "They will receive a secure review link and remain Pending until they sign."}</p>{inviteError && <p className="my-3 text-xs text-[#8b2635] dark:text-[#e0637a]">{inviteError}</p>}<button className={styles.primaryButton} type="submit">{inviteMode === "send" ? "Save and send" : "Send invitation"}</button></form>}
           </section>
         </div>
       )}
