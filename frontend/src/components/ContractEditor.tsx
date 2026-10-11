@@ -8,7 +8,8 @@ import ContractLoader from "../app/ContractLoader";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
 type User = { id: number; username: string; email: string };
-type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string };
+type ContractComment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; body: string; createdAt: string };
+type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: ContractComment[] };
 type Format = "bold" | "italic" | "underline" | "insertUnorderedList";
 
 const styles = {
@@ -78,6 +79,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [contractId, setContractId] = useState<string | null>(null);
   const [invitedEmail, setInvitedEmail] = useState("");
   const [invitationStatus, setInvitationStatus] = useState("");
+  const [contractStatus, setContractStatus] = useState("draft");
+  const [comments, setComments] = useState<ContractComment[]>([]);
   const [bodyToHydrate, setBodyToHydrate] = useState<string | undefined>(undefined);
   const [title, setTitle] = useState("Untitled contract");
   const [savedState, setSavedState] = useState("Saved to Pactum");
@@ -112,6 +115,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           setTitle(contract.title);
           setInvitedEmail(contract.invitedEmail || "");
           setInvitationStatus(contract.invitationStatus || "");
+          setContractStatus(contract.status);
+          setComments(contract.comments || []);
           setBodyToHydrate(contract.bodyHtml);
           setSavedState("Saved to Pactum");
         }
@@ -129,9 +134,18 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   useEffect(() => {
     if (bodyToHydrate === undefined || !editorRef.current) return;
     editorRef.current.innerHTML = bodyToHydrate;
+    ensureClauseIds();
     setClauses(Array.from(editorRef.current.querySelectorAll("ol > li"), (_, index) => index + 1));
     measureClausePositions();
   }, [bodyToHydrate]);
+
+  function ensureClauseIds() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.querySelectorAll("ol > li").forEach(clause => {
+      if (!clause.getAttribute("data-clause-id")) clause.setAttribute("data-clause-id", crypto.randomUUID());
+    });
+  }
 
   useEffect(() => () => {
     if (serverSaveTimer.current) window.clearTimeout(serverSaveTimer.current);
@@ -166,6 +180,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
 
   async function saveContractToServer(titleOverride = title) {
     if (!editorRef.current) throw new Error("Editor is not ready.");
+    if (contractStatus === "executed") throw new Error("Executed contracts cannot be edited.");
+    ensureClauseIds();
     setSavedState("Saving to Pactum...");
     const response = await fetch(`${API_BASE}/api/contracts/save/`, {
       method: "POST",
@@ -178,6 +194,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
 
     const contract = result.contract as ContractRecord;
     setContractId(contract.id);
+    setContractStatus(contract.status);
+    setComments(contract.comments || []);
     window.history.replaceState({}, "", `/contract/${contract.id}`);
     setSavedState("Saved to Pactum");
     return contract;
@@ -344,6 +362,13 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     }
   }
 
+  async function refreshComments() {
+    if (!contractId) return;
+    const response = await fetch(`${API_BASE}/api/contracts/${contractId}/comments/`, { credentials: "include" });
+    const result = await response.json();
+    if (response.ok) setComments(result.comments || []);
+  }
+
   const saveShortcutRef = useRef<() => void>(() => {});
 
   // keep the ref pointing at the latest handler (fresh contractId / title)
@@ -372,12 +397,12 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           
         </div>
         <div className={styles.documentName}>
-            <input className={styles.documentTitleInput} value={title} onChange={event => { const nextTitle = event.target.value; setTitle(nextTitle); setSavedState("Saving to Pactum..."); queueServerSave(nextTitle); }} aria-label="Contract title" />
+            <input className={styles.documentTitleInput} disabled={contractStatus === "executed"} value={title} onChange={event => { const nextTitle = event.target.value; setTitle(nextTitle); setSavedState("Saving to Pactum..."); queueServerSave(nextTitle); }} aria-label="Contract title" />
           <span className={styles.saveStatus}>{savedState}</span>
         </div>
         <div className={styles.appActions}>
-          <button className={styles.ghostButton} type="button" onClick={handleSaveContract}>Save contract</button>
-          <button className={styles.ghostButton} type="button" onClick={() => openInvite("invite")}>Invite party</button>
+          <button className={styles.ghostButton} type="button" disabled={contractStatus === "executed"} onClick={handleSaveContract}>Save contract</button>
+          <button className={styles.ghostButton} type="button" disabled={contractStatus === "executed"} onClick={() => openInvite("invite")}>Invite party</button>
         </div>
       </header>
 
@@ -391,7 +416,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           </select>
           <span className={styles.divider} />
           {toolbarItems.map(item => (
-            <button key={item.value} type="button" className={`${styles.toolButton} ${item.value === "italic" ? styles.italic : ""}`} onClick={() => runFormat(item.value)} aria-label={item.label} title={item.label}>{item.icon}</button>
+            <button key={item.value} type="button" disabled={contractStatus === "executed"} className={`${styles.toolButton} ${item.value === "italic" ? styles.italic : ""}`} onClick={() => runFormat(item.value)} aria-label={item.label} title={item.label}>{item.icon}</button>
           ))}
           <button type="button" className={styles.toolButton} onClick={() => { editorRef.current?.focus(); document.execCommand("justifyLeft", false); }} aria-label="Align left" title="Align left">≡</button>
           <span className={styles.divider} />
@@ -399,8 +424,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           <button type="button" className={styles.toolButton} onClick={() => { document.execCommand("redo", false); setSavedState("Unsaved changes"); }} aria-label="Redo" title="Redo">↷</button>
         </div>
         <div className={styles.editorTools}>
-          <button type="button" className={styles.textButton} onClick={addClause}>+ Clause</button>
-          <button type="button" className={styles.textButton} onClick={() => openInvite("invite")}>Comments</button>
+          <button type="button" disabled={contractStatus === "executed"} className={styles.textButton} onClick={addClause}>+ Clause</button>
+          <button type="button" className={styles.textButton} onClick={refreshComments}>Comments · {comments.length}</button>
         </div>
       </div>
 
@@ -422,7 +447,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
             <div
               ref={editorRef}
               className={styles.document}
-              contentEditable
+              contentEditable={contractStatus !== "executed"}
               suppressContentEditableWarning
               onInput={handleEditorInput}
               onKeyDown={handleEditorKeyDown}
@@ -462,9 +487,13 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           {!invitedEmail && <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>}
           <div className={styles.inspectorRule} />
           <p className={styles.eyebrow}>Document settings</p>
+          <div className={styles.setting}><span>Document status</span><strong className={contractStatus === "executed" ? "text-[#8b2635]" : styles.enabled}>{contractStatus === "executed" ? "Executed · Read only" : "Editable"}</strong></div>
           <div className={styles.setting}><span>Signature order</span><strong>Any order</strong></div>
           <div className={styles.setting}><span>Expiry</span><strong>Never</strong></div>
           <div className={styles.setting}><span>Audit trail</span><strong className={styles.enabled}>Enabled</strong></div>
+          <div className={styles.inspectorRule} />
+          <div className="flex items-center justify-between"><p className={styles.eyebrow}>Review comments</p><button type="button" className="text-[10px] font-semibold text-[#8b2635]" onClick={() => void refreshComments()}>Refresh</button></div>
+          {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {comment.clauseId ? "Clause" : `Clause ${comment.clauseIndex ?? "?"}`}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
         </aside>
       </div>
 

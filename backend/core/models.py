@@ -41,7 +41,23 @@ class ContractInvitation(models.Model):
     accepted_at = models.DateTimeField(null=True, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
     signer_name = models.CharField(max_length=200, blank=True)
+    invitee_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_invitations")
     signer_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="signed_invitations")
     signature_mode = models.CharField(max_length=16, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+
+
+class ContractComment(models.Model):
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name="comments")
+    invitation = models.ForeignKey(ContractInvitation, null=True, blank=True, on_delete=models.SET_NULL, related_name="comments")
+    author_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="contract_comments")
+    author_name = models.CharField(max_length=200, blank=True)
+    clause_id = models.CharField(max_length=64, blank=True)
+    quoted_text = models.TextField(max_length=1000, blank=True)
+    clause_index = models.PositiveIntegerField(null=True, blank=True)
+    body = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at",)

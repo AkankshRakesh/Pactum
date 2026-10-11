@@ -5,6 +5,17 @@ import ContractLoader from "../ContractLoader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
+async function readResponse(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 /* ─── palette ────────────────────────────────────────────────────── */
 const P = {
   bg:           "var(--d-bg)",
@@ -171,7 +182,7 @@ const recents = [
   { id: "PA-2026-0580", title: "Content Strategy Retainer",      edited: "2 months ago",   color: "#F4ECE4", dark: false },
 ];
 
-const TABS = ["Recently viewed", "Shared contracts", "Archived"];
+const TABS = ["Recently viewed", "Invited", "Shared contracts", "Archived"];
 
 function useViewport() {
   const [width, setWidth] = useState(1280);
@@ -198,7 +209,8 @@ export default function Dashboard() {
   const [filterOrg, setFilterOrg]     = useState("All clients");
   const [filterType, setFilterType]   = useState("All types");
   const [search, setSearch]           = useState("");
-  const [savedContracts, setSavedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string }>>([]);
+  const [savedContracts, setSavedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "owned" }>>([]);
+  const [invitedContracts, setInvitedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "invited" }>>([]);
   const [contractsLoaded, setContractsLoaded] = useState(false);
 
   useEffect(() => {
@@ -216,19 +228,20 @@ export default function Dashboard() {
     fetch(`${API_BASE}/api/auth/me/`, { credentials: "include", signal: controller.signal })
       .then(response => {
         if (!response.ok) throw new Error("unauthorized");
-        return response.json();
+        return readResponse(response);
       })
       .then(result => {
-        setUser(result.user);
+        if (!result.user || typeof result.user !== "object") throw new Error("unauthorized");
+        setUser(result.user as { username: string; email: string });
         return fetch(`${API_BASE}/api/contracts/`, { credentials: "include", signal: controller.signal });
       })
       .then(response => {
         if (!response) return null;
         if (!response.ok) throw new Error("contracts_unavailable");
-        return response.json();
+        return readResponse(response);
       })
       .then(result => {
-        if (result?.contracts) {
+        if (Array.isArray(result?.contracts)) {
           setSavedContracts(result.contracts.map((contract: { id: string; title: string; updatedAt: string; status: string; bodyHtml?: string }) => ({
             id: contract.id,
             title: contract.title,
@@ -236,6 +249,26 @@ export default function Dashboard() {
             color: contract.status === "sent" ? "#2A1117" : "#F0EBE3",
             dark: contract.status === "sent",
             bodyHtml: contract.bodyHtml,
+            source: "owned" as const,
+          })));
+        }
+        return fetch(`${API_BASE}/api/contracts/invited/`, { credentials: "include", signal: controller.signal });
+      })
+      .then(response => {
+        if (!response) return null;
+        if (!response.ok) throw new Error("invited_contracts_unavailable");
+        return response.json();
+      })
+      .then(result => {
+        if (Array.isArray(result?.contracts)) {
+          setInvitedContracts(result.contracts.map((contract: { id: string; title: string; updatedAt: string; status: string; bodyHtml?: string }) => ({
+            id: contract.id,
+            title: contract.title,
+            edited: new Date(contract.updatedAt).toLocaleDateString(),
+            color: contract.status === "executed" ? "#F0EBE3" : "#2A1117",
+            dark: contract.status !== "executed",
+            bodyHtml: contract.bodyHtml,
+            source: "invited" as const,
           })));
         }
         setContractsLoaded(true);
@@ -313,6 +346,10 @@ export default function Dashboard() {
   const filteredRecents = savedContracts.filter(r =>
     search === "" || r.title.toLowerCase().includes(search.toLowerCase())
   );
+  const filteredInvited = invitedContracts.filter(r =>
+    search === "" || r.title.toLowerCase().includes(search.toLowerCase())
+  );
+  const displayedContracts = activeTab === 1 ? filteredInvited : activeTab === 0 ? filteredRecents : [];
 
   return (
     <div
@@ -612,17 +649,19 @@ export default function Dashboard() {
         </div>
 
         {/* grid */}
-        {viewMode === "grid" ? (
+        {displayedContracts.length === 0 ? (
+          <div style={{ padding: "56px 20px", textAlign: "center", color: P.textMuted, fontSize: 13 }}>{activeTab === 1 ? "No contracts have been invited to your account." : "No contracts to display."}</div>
+        ) : viewMode === "grid" ? (
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(200px, 1fr))",
             gap: isMobile ? 12 : 16,
           }}>
-            {filteredRecents.map(r => (
+            {displayedContracts.map(r => (
               <div
                 key={r.id}
                 style={{ cursor: contractsLoaded ? "pointer" : "default", position: "relative" }}
-                onClick={() => { if (contractsLoaded) router.push(`/contract/${r.id}`); }}
+                onClick={() => { if (contractsLoaded) router.push(r.source === "invited" ? `/contract/${r.id}?review=1` : `/contract/${r.id}`); }}
               >
                 {/* thumbnail */}
                 <div
@@ -646,7 +685,7 @@ export default function Dashboard() {
                 >
                   <ContractPreview bodyHtml={"bodyHtml" in r && typeof r.bodyHtml === "string" ? r.bodyHtml : undefined} />
                 </div>
-                {contractsLoaded && <button type="button" onClick={event => { event.stopPropagation(); void handleDeleteContract(r.id); }} title="Delete contract" aria-label={`Delete ${r.title}`} style={{ position: "absolute", top: 8, right: 8, border: 0, background: P.surface, color: P.textMuted, cursor: "pointer", width: 24, height: 24, borderRadius: 4 }}>×</button>}
+                {contractsLoaded && r.source === "owned" && <button type="button" onClick={event => { event.stopPropagation(); void handleDeleteContract(r.id); }} title="Delete contract" aria-label={`Delete ${r.title}`} style={{ position: "absolute", top: 8, right: 8, border: 0, background: P.surface, color: P.textMuted, cursor: "pointer", width: 24, height: 24, borderRadius: 4 }}>×</button>}
 
                 {/* file info row */}
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -682,7 +721,7 @@ export default function Dashboard() {
               <div />
             </div>
 
-            {filteredRecents.map(r => (
+            {displayedContracts.map(r => (
               <div
                 key={r.id}
                 style={{
@@ -692,7 +731,7 @@ export default function Dashboard() {
                   transition: "background 0.15s", alignItems: "center",
                   columnGap: isMobile ? 8 : 0,
                 }}
-                onClick={() => { if (contractsLoaded) router.push(`/contract/${r.id}`); }}
+                onClick={() => { if (contractsLoaded) router.push(r.source === "invited" ? `/contract/${r.id}?review=1` : `/contract/${r.id}`); }}
                 onMouseEnter={e => (e.currentTarget.style.background = dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
@@ -709,7 +748,7 @@ export default function Dashboard() {
                 {!isTablet && <div style={{ fontSize: 11, color: P.accent, background: P.accentMuted, padding: "2px 8px", borderRadius: 4, display: "inline-block", width: "fit-content" }}>Contract</div>}
 
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  {contractsLoaded && (
+                  {contractsLoaded && r.source === "owned" && (
                     <button
                       type="button"
                       onClick={event => { event.stopPropagation(); void handleDeleteContract(r.id); }}
