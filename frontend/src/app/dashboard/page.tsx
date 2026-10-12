@@ -18,6 +18,7 @@ async function readResponse(response: Response): Promise<Record<string, unknown>
   }
 }
 
+
 /* ─── palette ────────────────────────────────────────────────────── */
 const P = {
   bg:           "var(--d-bg)",
@@ -167,10 +168,10 @@ function ContractPreview({ bodyHtml }: { bodyHtml?: string }) {
 
 /* ─── data ────────────────────────────────────────────────────────── */
 const templates = [
-  { id: 1, title: "Service Agreement Template",   author: "Pactum Legal",  likes: "4.1k", users: "92k",  thumb: <ThumbServiceAgreement />, badge: "Most Used" },
-  { id: 2, title: "Non-Disclosure Agreement (NDA)", author: "Legal Vault",   likes: "2.8k", users: "61k",  thumb: <ThumbNDA /> },
-  { id: 3, title: "Freelance Contract Starter",   author: "Pactum Community", likes: "3.3k", users: "108k", thumb: <ThumbFreelance />, badge: "100K+ Used" },
-  { id: 4, title: "Monthly Retainer Agreement",   author: "Pactum Legal",  likes: "1.9k", users: "34k",  thumb: <ThumbRetainer /> },
+  { id: 1, slug: "service-agreement",  title: "Service Agreement Template",     author: "Pactum Legal",     likes: "4.1k", users: "92k",  thumb: <ThumbServiceAgreement />, badge: "Most Used" },
+  { id: 2, slug: "nda",                title: "Non-Disclosure Agreement (NDA)", author: "Legal Vault",      likes: "2.8k", users: "61k",  thumb: <ThumbNDA /> },
+  { id: 3, slug: "freelance-contract", title: "Freelance Contract Starter",     author: "Pactum Community", likes: "3.3k", users: "108k", thumb: <ThumbFreelance />, badge: "100K+ Used" },
+  { id: 4, slug: "monthly-retainer",   title: "Monthly Retainer Agreement",     author: "Pactum Legal",     likes: "1.9k", users: "34k",  thumb: <ThumbRetainer /> },
 ];
 
 const recents = [
@@ -529,6 +530,10 @@ export default function Dashboard() {
               {templates.map(t => (
                 <div
                   key={t.id}
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => router.push(`/new?template=${t.slug}`)}
+                  onKeyDown={e => { if (e.key === "Enter") router.push(`/new?template=${t.slug}`); }}
                   style={{ cursor: "pointer", ...(isMobile && { flex: "0 0 220px", scrollSnapAlign: "start" }) }}
                   onMouseEnter={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "0.85"}
                   onMouseLeave={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "1"}

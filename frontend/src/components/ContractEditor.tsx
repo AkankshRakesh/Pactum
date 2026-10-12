@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { CommentStatusActions, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
 import ContractLoader from "../app/ContractLoader";
 import { useConfirm } from "./ConfirmDialog";
+import { buildTemplateBody, getTemplate } from "./contractTemplates";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
@@ -154,6 +155,13 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           setComments(contract.comments || []);
           setBodyToHydrate(contract.bodyHtml);
           setSavedState("Saved to Pactum");
+        } else {
+          const template = getTemplate(new URLSearchParams(window.location.search).get("template"));
+          if (template) {
+            setTitle(template.title);
+            setBodyToHydrate(buildTemplateBody(template));
+            setSavedState("Not saved yet");
+          }
         }
         setCheckingSession(false);
       } catch {

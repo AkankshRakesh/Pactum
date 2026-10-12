@@ -381,10 +381,6 @@ export default function ContractReview({ contractId }: { contractId: string }) {
           <div className="mx-auto w-full max-w-215">
             <div ref={paperRef} className={`${styles.paper} relative`}>
               <div className={styles.document}>
-                <p className={styles.kicker}>Pactum instrument · Review</p>
-                <h1 className="pactum-display mb-2 text-3xl font-bold leading-tight sm:text-[34px]">{contract.title}</h1>
-                {contract.subtitle && <p className="mb-2 text-sm text-black/50 dark:text-white/50">{contract.subtitle}</p>}
-                <hr className="my-7 border-0 border-t border-black/10 dark:border-white/10" />
                 <div ref={contentRef} dangerouslySetInnerHTML={{ __html: contract.bodyHtml }} />
               </div>
 
