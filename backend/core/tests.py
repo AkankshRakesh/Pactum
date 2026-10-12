@@ -111,6 +111,96 @@ class ContractCollaborationTests(TestCase):
         comment.refresh_from_db()
         self.assertEqual(comment.clause_id, "clause-one")
 
+    def test_owner_save_deletes_removed_clause_comments_and_reindexes_survivors(self):
+        comment_one = ContractComment.objects.create(
+            contract=self.contract,
+            invitation=self.invitation,
+            clause_id="clause-one",
+            clause_index=1,
+            body="Comment A",
+        )
+        comment_two = ContractComment.objects.create(
+            contract=self.contract,
+            invitation=self.invitation,
+            clause_id="clause-two",
+            clause_index=2,
+            body="Comment B",
+        )
+        comment_three = ContractComment.objects.create(
+            contract=self.contract,
+            invitation=self.invitation,
+            clause_id="clause-three",
+            clause_index=3,
+            body="Comment C",
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            "/api/contracts/save/",
+            {
+                "id": str(self.contract.id),
+                "bodyHtml": '<ol><li data-clause-id="clause-one">Payment is due within 30 days.</li><li data-clause-id="clause-three">Either party may terminate.</li></ol>',
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ContractComment.objects.filter(pk=comment_two.pk).exists())
+        comment_one.refresh_from_db()
+        comment_three.refresh_from_db()
+        self.assertEqual(comment_one.clause_id, "clause-one")
+        self.assertEqual(comment_one.clause_index, 1)
+        self.assertEqual(comment_three.clause_id, "clause-three")
+        self.assertEqual(comment_three.clause_index, 2)
+
+        refreshed = self.client.get(f"/api/contracts/{self.contract.id}/comments/")
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual({comment["clauseId"] for comment in refreshed.json()["comments"]}, {"clause-one", "clause-three"})
+
+    def test_legacy_comment_is_resolved_from_old_position_before_deletion(self):
+        legacy = ContractComment.objects.create(
+            contract=self.contract,
+            invitation=self.invitation,
+            clause_index=2,
+            body="Legacy comment",
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            "/api/contracts/save/",
+            {
+                "id": str(self.contract.id),
+                "bodyHtml": '<ol><li data-clause-id="clause-one">Payment is due within 30 days.</li></ol>',
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ContractComment.objects.filter(pk=legacy.pk).exists())
+
+    def test_legacy_comment_outside_document_is_not_reassigned(self):
+        legacy = ContractComment.objects.create(
+            contract=self.contract,
+            invitation=self.invitation,
+            clause_index=99,
+            body="Unresolved legacy comment",
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            "/api/contracts/save/",
+            {
+                "id": str(self.contract.id),
+                "bodyHtml": '<ol><li data-clause-id="clause-one">Payment is due within 30 days.</li><li data-clause-id="clause-two">Either party may terminate.</li></ol>',
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.clause_id, "")
+        self.assertEqual(legacy.clause_index, 99)
+
     def test_executed_contract_is_readable_but_not_mutable(self):
         self.invitation.invitee_user = self.invitee
         self.invitation.status = ContractInvitation.Status.ACCEPTED

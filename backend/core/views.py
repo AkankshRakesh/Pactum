@@ -21,6 +21,7 @@ from django.db.models import Q
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
+from html.parser import HTMLParser
 
 from .models import Contract, ContractComment, ContractInvitation
 
@@ -411,23 +412,100 @@ def _clean_document_html(value):
     return html[:200000]
 
 
+class _TopLevelClauseParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.ol_depth = 0
+        self.li_depth = 0
+        self.clause_ids = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "ol":
+            self.ol_depth += 1
+        elif tag == "li":
+            if self.ol_depth == 1 and self.li_depth == 0:
+                self.clause_ids.append(dict(attrs).get("data-clause-id", ""))
+            self.li_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if tag.lower() == "li" and self.ol_depth == 1 and self.li_depth == 0:
+            self.clause_ids.append(dict(attrs).get("data-clause-id", ""))
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag == "li":
+            self.li_depth = max(0, self.li_depth - 1)
+        elif tag == "ol":
+            self.ol_depth = max(0, self.ol_depth - 1)
+
+
+def _top_level_clause_ids(html):
+    parser = _TopLevelClauseParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:
+        return []
+    return parser.clause_ids
+
+
 def _normalise_clause_ids(html):
     """Add stable IDs to top-level ordered-list clauses without changing visible text."""
+    seen = set()
+
     def add_ids(match):
         opening, content, closing = match.groups()
-        counter = 0
 
         def add_id(li_match):
-            nonlocal counter
-            counter += 1
             tag = li_match.group(0)
-            if re.search(r"\bdata-clause-id\s*=", tag, flags=re.IGNORECASE):
+            existing = re.search(r"\bdata-clause-id\s*=\s*([\"'])(.*?)\1", tag, flags=re.IGNORECASE)
+            existing_id = existing.group(2).strip() if existing else ""
+            if existing_id and existing_id not in seen:
+                seen.add(existing_id)
                 return tag
-            return tag[:-1] + f' data-clause-id="{uuid.uuid4().hex}"' + ">"
+            if existing:
+                tag = tag[:existing.start()] + tag[existing.end():]
+            clause_id = uuid.uuid4().hex
+            seen.add(clause_id)
+            return tag[:-1] + f' data-clause-id="{clause_id}"' + ">"
 
         return opening + re.sub(r"<li\b[^>]*>", add_id, content, flags=re.IGNORECASE) + closing
 
     return re.sub(r"(<ol\b[^>]*>)(.*?)(</ol>)", add_ids, html, flags=re.IGNORECASE | re.DOTALL)
+
+
+def _sync_comment_clause_metadata(contract, previous_ids, current_ids):
+    """Delete comments for removed IDs and keep positional indexes current.
+
+    Legacy comments are resolved against the pre-save document only when their
+    old numeric position maps to exactly one clause. Unresolved comments remain
+    visible as legacy history and are never reassigned by a later deletion.
+    """
+    previous_id_set = {clause_id for clause_id in previous_ids if clause_id}
+    current_positions = {clause_id: index for index, clause_id in enumerate(current_ids, start=1) if clause_id}
+    removed_ids = previous_id_set - set(current_positions)
+
+    comments = list(contract.comments.all())
+    for comment in comments:
+        updates = []
+        if not comment.clause_id and comment.clause_index and 1 <= comment.clause_index <= len(previous_ids):
+            legacy_id = previous_ids[comment.clause_index - 1]
+            if legacy_id and previous_ids.count(legacy_id) == 1:
+                comment.clause_id = legacy_id
+                updates.append("clause_id")
+
+        if comment.clause_id in removed_ids:
+            comment.delete()
+            continue
+
+        if comment.clause_id in current_positions:
+            current_index = current_positions[comment.clause_id]
+            if comment.clause_index != current_index:
+                comment.clause_index = current_index
+                updates.append("clause_index")
+        if updates:
+            comment.save(update_fields=list(dict.fromkeys(updates)))
 
 
 def _contract_data(contract, include_body=False):
@@ -630,10 +708,14 @@ def contract_save(request):
             return JsonResponse({"detail": "Contract not found."}, status=404)
         if contract.status == Contract.Status.EXECUTED:
             return JsonResponse({"detail": "Executed contracts cannot be edited."}, status=409)
-        contract.title = title
-        contract.subtitle = subtitle
-        contract.body_html = body_html
-        contract.save(update_fields=["title", "subtitle", "body_html", "updated_at"])
+        previous_ids = _top_level_clause_ids(contract.body_html)
+        current_ids = _top_level_clause_ids(body_html)
+        with transaction.atomic():
+            contract.title = title
+            contract.subtitle = subtitle
+            contract.body_html = body_html
+            contract.save(update_fields=["title", "subtitle", "body_html", "updated_at"])
+            _sync_comment_clause_metadata(contract, previous_ids, current_ids)
     else:
         contract = Contract.objects.create(
             creator=request.user,

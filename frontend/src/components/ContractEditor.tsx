@@ -93,6 +93,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [clausePositions, setClausePositions] = useState<number[]>([]);
   const skipNextEmptyRemoval = useRef(false);
   const serverSaveTimer = useRef<number | null>(null);
+  const pendingDeletedComments = useRef<ContractComment[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);              // bottom sheet / slide-over
   const [activeClause, setActiveClause] = useState<number | null>(null); // clause popover (index)
   const [clauseIds, setClauseIds] = useState<string[]>([]);       // data-clause-id per <li>, by index
@@ -176,9 +177,20 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     if (serverSaveTimer.current) window.clearTimeout(serverSaveTimer.current);
     serverSaveTimer.current = window.setTimeout(() => {
       void saveContractToServer(titleOverride).catch(error => {
+        restorePendingDeletedComments();
         setSavedState(error instanceof Error ? error.message : "Unable to save to Pactum.");
       });
     }, 500);
+  }
+
+  function restorePendingDeletedComments() {
+    if (pendingDeletedComments.current.length === 0) return;
+    const restored = pendingDeletedComments.current;
+    pendingDeletedComments.current = [];
+    setComments(current => {
+      const existing = new Set(current.map(comment => comment.id));
+      return [...current, ...restored.filter(comment => !existing.has(comment.id))].sort((left, right) => left.id - right.id);
+    });
   }
 
   async function getCsrfToken() {
@@ -205,6 +217,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     setContractId(contract.id);
     setContractStatus(contract.status);
     setComments(contract.comments || []);
+    pendingDeletedComments.current = [];
     window.requestAnimationFrame(measureClausePositions);
     window.history.replaceState({}, "", `/contract/${contract.id}`);
     setSavedState("Saved to Pactum");
@@ -219,6 +232,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     try {
       await saveContractToServer();
     } catch (error) {
+      restorePendingDeletedComments();
       setSavedState(error instanceof Error ? error.message : "Unable to save contract.");
     }
   }
@@ -227,10 +241,22 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     const editor = editorRef.current;
     if (!editor) return;
 
-    editor.querySelectorAll("ol > li")[index]?.remove();
-    setClauses(current => current.filter((_, clauseIndex) => clauseIndex !== index).map((_, clauseIndex) => clauseIndex + 1));
+    const items = Array.from(editor.querySelectorAll("ol > li"));
+    const clause = items[index];
+    const clauseId = clause?.getAttribute("data-clause-id") || "";
+    if (!clause) return;
+
+    clause.remove();
+    setComments(current => {
+      const removed = current.filter(comment => comment.clauseId === clauseId);
+      pendingDeletedComments.current.push(...removed);
+      return current.filter(comment => comment.clauseId !== clauseId);
+    });
+    setActiveClause(null);
+    setClauses(items.filter((_, clauseIndex) => clauseIndex !== index).map((_, clauseIndex) => clauseIndex + 1));
     window.requestAnimationFrame(measureClausePositions);
     setSavedState("Unsaved changes");
+    queueServerSave();
   }
 
   function measureClausePositions() {
@@ -305,7 +331,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     <div className={styles.setting}><span>Audit trail</span><strong className={styles.enabled}>Enabled</strong></div>
     <div className={styles.inspectorRule} />
     <div className="flex items-center justify-between"><p className={styles.eyebrow}>Review comments</p><button type="button" className="text-[10px] font-semibold text-[#8b2635]" onClick={() => void refreshComments()}>Refresh</button></div>
-    {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {`Clause ${comment.clauseIndex ?? "?"}`}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
+    {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {commentClauseLabel(comment)}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
     </>
   );
 
@@ -433,10 +459,17 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function commentsForClause(index: number) {
-    const id = clauseIds[index];
-    // new comments match by clauseId; older ones fall back to clauseIndex (assumed 1-based)
-    return comments.filter(c => (c.clauseId ? c.clauseId === id : c.clauseIndex === index + 1));
+  function commentsForClause(clauseId: string) {
+    if (!clauseId) return [];
+    return comments.filter(comment => comment.clauseId === clauseId);
+  }
+
+  function commentClauseLabel(comment: ContractComment) {
+    if (comment.clauseId) {
+      const currentIndex = clauseIds.indexOf(comment.clauseId);
+      return currentIndex >= 0 ? `Clause ${currentIndex + 1}` : "Deleted or unavailable clause";
+    }
+    return "Legacy comment · clause position unavailable";
   }
 
   function openPanel() {
@@ -522,7 +555,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
             <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">Your clause headings will appear here.</p>
           ) : (
             clauses.map((clause, index) => (
-              <button key={clause} type="button" className={styles.outlineActive} onClick={() => editorRef.current?.querySelectorAll("ol > li")[index]?.scrollIntoView({ behavior: "smooth", block: "center" })}>Clause {clause}</button>
+              <button key={clauseIds[index] || `clause-${index}`} type="button" className={styles.outlineActive} onClick={() => editorRef.current?.querySelectorAll("ol > li")[index]?.scrollIntoView({ behavior: "smooth", block: "center" })}>Clause {index + 1}</button>
             ))
           )}
         </aside>
@@ -549,7 +582,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
             </div>
 
             {clauses.map((clause, index) => {
-              const list = commentsForClause(index);
+              const clauseId = clauseIds[index] || "";
+              const list = commentsForClause(clauseId);
               if (list.length === 0) return null;
               const top = clausePositions[index] ?? 0;
               const open = activeClause === index;
@@ -577,7 +611,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
                         className="absolute right-2 z-20 max-h-72 w-[min(300px,calc(100%-16px))] overflow-y-auto rounded-xl border border-[#8b2635]/25 bg-[#faf6f2] p-3 text-[#1a0f10] shadow-[0_12px_40px_rgba(15,7,8,0.25)] sm:right-4 dark:border-[#c1445a]/30 dark:bg-[#160b0c] dark:text-[#f0e8e8]"
                       >
                         <div className="mb-2 flex items-center justify-between">
-                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8b2635] dark:text-[#c1445a]">Clause {clause}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8b2635] dark:text-[#c1445a]">Clause {index + 1}</p>
                           <button type="button" className={styles.closeButton} onClick={() => setActiveClause(null)} aria-label="Close comments">×</button>
                         </div>
                         {list.map(comment => (
@@ -602,7 +636,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           {clauses.length > 0 && (
             <div className={`${styles.clauseRail} relative`} aria-label="Clause actions">
               {clauses.map((clause, index) => (
-                <button key={clause} type="button" className={`${styles.deleteClauseButton} absolute left-0`} style={{ top: clausePositions[index] ?? 0 }} onClick={() => removeClause(index)} aria-label={`Delete clause ${clause}`} title={`Delete clause ${clause}`}>×</button>
+                <button key={clauseIds[index] || `delete-${index}`} type="button" className={`${styles.deleteClauseButton} absolute left-0`} style={{ top: clausePositions[index] ?? 0 }} onClick={() => removeClause(index)} aria-label={`Delete clause ${index + 1}`} title={`Delete clause ${index + 1}`}>×</button>
               ))}
             </div>
           )}
