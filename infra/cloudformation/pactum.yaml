@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Pactum baseline network, EKS, RDS PostgreSQL, S3 and Secrets Manager resources. Review for production before use.
+Parameters:
+  ClusterName:
+    Type: String
+    Default: pactum-eks
+  KubernetesVersion:
+    Type: String
+    Default: '1.33'
+  EksPublicAccessCidrs:
+    Type: CommaDelimitedList
+    Description: CIDR allowlist for the EKS API endpoint. Restrict to Jenkins/VPN egress IPs.
+  NodeInstanceTypes:
+    Type: String
+    Default: t3.medium
+  DesiredNodes:
+    Type: Number
+    Default: 2
+  MaxNodes:
+    Type: Number
+    Default: 3
+  DbName:
+    Type: String
+    Default: pactum
+  DbUsername:
+    Type: String
+    Default: pactumadmin
+  DbInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  ContractsBucketName:
+    Type: String
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref AcmCertificateArn, '']]
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.40.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: !Sub '${AWS::StackName}-vpc'}]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref VPC, InternetGatewayId: !Ref InternetGateway}
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.40.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: kubernetes.io/role/elb, Value: '1'}]
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.40.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: kubernetes.io/role/elb, Value: '1'}]
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.40.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{Key: kubernetes.io/role/internal-elb, Value: '1'}]
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.40.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: [{Key: kubernetes.io/role/internal-elb, Value: '1'}]
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref VPC}
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties: {RouteTableId: !Ref PublicRouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway}
+  PublicAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicSubnetA, RouteTableId: !Ref PublicRouteTable}
+  PublicAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable}
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties: {Domain: vpc}
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: PublicAssociationA
+    Properties: {AllocationId: !GetAtt NatEip.AllocationId, SubnetId: !Ref PublicSubnetA}
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref VPC}
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties: {RouteTableId: !Ref PrivateRouteTable, DestinationCidrBlock: 0.0.0.0/0, NatGatewayId: !Ref NatGateway}
+  PrivateAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateSubnetA, RouteTableId: !Ref PrivateRouteTable}
+  PrivateAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateSubnetB, RouteTableId: !Ref PrivateRouteTable}
+  EksClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: eks.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+  NodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+      Policies:
+        - PolicyName: PactumContractsBucketAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ContractsBucketName}/*'
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ContractsBucketName}'
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      Version: !Ref KubernetesVersion
+      RoleArn: !GetAtt EksClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds: [!Ref PublicSubnetA, !Ref PublicSubnetB, !Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+        PublicAccessCidrs: !Ref EksPublicAccessCidrs
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref Cluster
+      NodegroupName: !Sub '${ClusterName}-workers'
+      NodeRole: !GetAtt NodeRole.Arn
+      Subnets: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+      InstanceTypes: !Split [',', !Ref NodeInstanceTypes]
+      ScalingConfig: {MinSize: 2, DesiredSize: !Ref DesiredNodes, MaxSize: !Ref MaxNodes}
+      AmiType: AL2023_x86_64_STANDARD
+      CapacityType: ON_DEMAND
+      UpdateConfig: {MaxUnavailable: 1}
+      Labels: {workload: pactum}
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}/rds/master'
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 28
+        ExcludePunctuation: true
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS PostgreSQL access from EKS cluster/node security group only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt Cluster.ClusterSecurityGroupId
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Pactum RDS private subnets
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: !Ref DbName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!GetAtt DbSecurityGroup.GroupId]
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+  ContractsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ContractsBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      VersioningConfiguration: {Status: Enabled}
+Outputs:
+  ClusterName: {Value: !Ref Cluster}
+  ClusterArn: {Value: !GetAtt Cluster.Arn}
+  VpcId: {Value: !Ref VPC}
+  PublicSubnetIds: {Value: !Join [',', [!Ref PublicSubnetA, !Ref PublicSubnetB]]}
+  PrivateSubnetIds: {Value: !Join [',', [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]}
+  DbEndpoint: {Value: !GetAtt Database.Endpoint.Address}
+  DbPort: {Value: !GetAtt Database.Endpoint.Port}
+  DbName: {Value: !Ref DbName}
+  DbSecretArn: {Value: !Ref DbSecret}
+  ContractsBucketName: {Value: !Ref ContractsBucket}
