@@ -17,7 +17,7 @@ This is a deployment scaffold for the Pactum repository:
 5. Django uses PostgreSQL in production. The CloudFormation stack creates RDS PostgreSQL and its credentials in Secrets Manager. Migrations run as a Kubernetes Job.
 6. This stack creates a small public/private subnet topology with one NAT Gateway for a simplified baseline. NAT, EKS, RDS, ALB, EC2 and data transfer incur costs. For production, use multi-AZ private subnets and at least two NAT gateways, which increases cost.
 7. Set `ACM_CERTIFICATE_ARN` to a valid ACM certificate in the same region for HTTPS. Without it, the scaffold can use HTTP temporarily; do not expose sensitive production traffic over plain HTTP.
-8. Existing Jenkins must have AWS CLI v2, kubectl, Helm, Docker, jq, curl, eksctl, Python 3 and permission to access the AWS account. Docker daemon access is required.
+8. Existing Jenkins must have AWS CLI v2, kubectl, Helm, Docker, jq, Python 3 and permission to access the AWS account. Docker daemon access is required.
 9. CloudFormation cannot safely roll back a database schema after an application migration. Use backward-compatible migrations and keep previous image tags.
 10. This is a scaffold, not a substitute for reviewing your actual settings, CORS/CSRF, auth, uploads, and database schema. Test in a non-production AWS account first.
 
@@ -50,18 +50,18 @@ export S3_BUCKET_NAME="pactum-contracts-${AWS_ACCOUNT_ID}-${AWS_REGION}"
 ./bootstrap.sh
 ```
 
-The Jenkins pipeline can provision the infrastructure from a clean account when all required parameters are set. `bootstrap.sh` is an optional manual first-run path. CloudFormation creates the RDS password in Secrets Manager. Configure Jenkins credentials:
+CloudFormation creates the RDS password in Secrets Manager. Capture stack outputs, and configure Jenkins credentials:
 - `aws-deploy-role` or AWS credentials available to the Jenkins agent (prefer instance profile / assumed role)
 - `dockerhub-credentials` as username/password credential
 - `pactum-django-secret-key` as Secret text
 - `pactum-dockerhub-user` as Secret text, if your image names need a separate username
 
 Set Jenkins job parameters/environment:
-- `AWS_REGION`, `STACK_NAME`, `CLUSTER_NAME`, `KUBERNETES_VERSION`, `S3_BUCKET_NAME`, `EKS_PUBLIC_ACCESS_CIDRS`, `DB_NAME`, `DB_USERNAME`, `DB_INSTANCE_CLASS`, `NODE_INSTANCE_TYPES`, `DESIRED_NODES`, `MAX_NODES`
+- `AWS_REGION`, `STACK_NAME`, `CLUSTER_NAME`
 - `DOCKERHUB_USERNAME`
 - `BACKEND_IMAGE`, `FRONTEND_IMAGE` (e.g. `dockerhub-user/pactum-backend`)
 - `DOMAIN_NAME` (optional)
-- `ACM_CERTIFICATE_ARN` (optional; set a valid same-region ACM certificate ARN to enable HTTPS and HTTP-to-HTTPS redirect)
+- `ACM_CERTIFICATE_ARN` (optional; must be supplied during bootstrap for HTTPS)
 - `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`
 - `NEXT_PUBLIC_API_BASE_URL` (publicly reachable URL or same-origin API path)
 
@@ -72,6 +72,6 @@ Set Jenkins job parameters/environment:
 - Restrict Jenkins inbound access to VPN/known IPs; do not expose port 8080 to the world.
 - RDS is private and accepts connections only from the EKS node security group.
 - S3 public access is blocked; configure Django storage access using workload IAM (IRSA/EKS Pod Identity) before enabling direct S3 uploads.
-- The baseline grants the EKS node role access only to the configured S3 bucket so Django can use it without static AWS keys. For stronger isolation, replace this with an IRSA/EKS Pod Identity role bound to the Django service account.
-- The Jenkins pipeline runs `scripts/install-addons.sh` to configure IRSA and install the AWS Load Balancer Controller. Review and pin the controller release and IAM policy for production.
+- The basic stack's workload-to-S3 IAM role association is a follow-up hardening step because it depends on your cluster OIDC/provider setup. Do not put long-lived AWS keys in Kubernetes Secrets.
+- The ALB controller needs an IAM policy and service account role. Install it using the official AWS Load Balancer Controller policy for your cluster version; see `deploy/kubernetes/README.md`.
 - EKS endpoint access is public in this baseline, restricted by `EKS_PUBLIC_ACCESS_CIDRS`. Set this to your office/VPN/Jenkins egress CIDRs, not `0.0.0.0/0`, for production.
