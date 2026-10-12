@@ -93,6 +93,11 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [clausePositions, setClausePositions] = useState<number[]>([]);
   const skipNextEmptyRemoval = useRef(false);
   const serverSaveTimer = useRef<number | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);              // bottom sheet / slide-over
+  const [activeClause, setActiveClause] = useState<number | null>(null); // clause popover (index)
+  const [clauseIds, setClauseIds] = useState<string[]>([]);       // data-clause-id per <li>, by index
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const inviteInFlight = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,8 +147,11 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   function ensureClauseIds() {
     const editor = editorRef.current;
     if (!editor) return;
+    const seen = new Set<string>();
     editor.querySelectorAll("ol > li").forEach(clause => {
-      if (!clause.getAttribute("data-clause-id")) clause.setAttribute("data-clause-id", crypto.randomUUID());
+      const existing = clause.getAttribute("data-clause-id");
+      if (!existing || seen.has(existing)) clause.setAttribute("data-clause-id", crypto.randomUUID());
+      seen.add(clause.getAttribute("data-clause-id")!);
     });
   }
 
@@ -160,6 +168,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   function updateDocument() {
     setSavedState("Saving to Pactum...");
     queueServerSave();
+    window.requestAnimationFrame(measureClausePositions);
   }
 
   function queueServerSave(titleOverride = title) {
@@ -196,6 +205,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     setContractId(contract.id);
     setContractStatus(contract.status);
     setComments(contract.comments || []);
+    window.requestAnimationFrame(measureClausePositions);
     window.history.replaceState({}, "", `/contract/${contract.id}`);
     setSavedState("Saved to Pactum");
     return contract;
@@ -229,7 +239,9 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     if (!editor || !paper) return;
 
     const paperTop = paper.getBoundingClientRect().top;
-    setClausePositions(Array.from(editor.querySelectorAll("ol > li"), item => item.getBoundingClientRect().top - paperTop));
+    const items = Array.from(editor.querySelectorAll("ol > li"));
+    setClausePositions(items.map(item => item.getBoundingClientRect().top - paperTop));
+    setClauseIds(items.map(item => item.getAttribute("data-clause-id") || ""));
   }
 
   function getActiveClause(target: EventTarget | null) {
@@ -271,6 +283,32 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     }
   }
 
+  const partiesAndComments = (
+  <>
+    <p className={styles.eyebrow}>Parties</p>
+    <div className={styles.partyCard}><div className={styles.partyAvatar}>C</div><div><strong className="block text-xs font-semibold">{user?.username}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Creator · You</span></div><i className={styles.statusDot} /></div>
+    {invitedEmail ? (
+      <div className={styles.partyCard}>
+        <div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div>
+        <div className="min-w-0 flex-1"><strong className="block truncate text-xs font-semibold">{invitedEmail}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">{invitationStatus === "accepted" ? "Signed" : invitationStatus === "revoked" ? "Revoked" : "Pending"}</span></div>
+        {invitationStatus !== "accepted" && invitationStatus !== "revoked" && <button type="button" className="border-0 bg-transparent px-1 text-lg text-black/40 hover:text-[#8b2635] dark:text-white/40 dark:hover:text-[#e0637a]" onClick={revokeInvitation} title="Invalidate invitation link" aria-label="Invalidate invitation link">×</button>}
+      </div>
+    ) : (
+      <div className={styles.partyCard}><div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div><div><strong className="block text-xs font-semibold">Invite someone</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Second signer</span></div></div>
+    )}
+    {!invitedEmail && <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>}
+    <div className={styles.inspectorRule} />
+    <p className={styles.eyebrow}>Document settings</p>
+    <div className={styles.setting}><span>Document status</span><strong className={contractStatus === "executed" ? "text-[#8b2635]" : styles.enabled}>{contractStatus === "executed" ? "Executed · Read only" : "Editable"}</strong></div>
+    <div className={styles.setting}><span>Signature order</span><strong>Any order</strong></div>
+    <div className={styles.setting}><span>Expiry</span><strong>Never</strong></div>
+    <div className={styles.setting}><span>Audit trail</span><strong className={styles.enabled}>Enabled</strong></div>
+    <div className={styles.inspectorRule} />
+    <div className="flex items-center justify-between"><p className={styles.eyebrow}>Review comments</p><button type="button" className="text-[10px] font-semibold text-[#8b2635]" onClick={() => void refreshComments()}>Refresh</button></div>
+    {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {`Clause ${comment.clauseIndex ?? "?"}`}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
+    </>
+  );
+
   useEffect(() => {
     measureClausePositions();
     const handleResize = () => measureClausePositions();
@@ -290,6 +328,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
 
     const clause = document.createElement("li");
     clause.className = "mb-3 min-h-7 list-item pl-2";
+    clause.setAttribute("data-clause-id", crypto.randomUUID());
     clause.textContent = "";
     clauseList.appendChild(clause);
     setClauses(current => [...current, current.length + 1]);
@@ -307,7 +346,9 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   
   function sendInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!inviteEmail.trim()) return;
+    if (!inviteEmail.trim() || inviteInFlight.current) return;
+    inviteInFlight.current = true;
+    setInviteBusy(true);
     setInviteError("");
     void (async () => {
       try {
@@ -333,6 +374,9 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         if (inviteMode === "send") setSavedState("Sent to invited party");
       } catch (error) {
         setInviteError(error instanceof Error ? error.message : "Unable to process invitation.");
+      } finally {
+        inviteInFlight.current = false;
+        setInviteBusy(false);
       }
     })();
   }
@@ -366,8 +410,10 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     if (!contractId) return;
     const response = await fetch(`${API_BASE}/api/contracts/${contractId}/comments/`, { credentials: "include" });
     const result = await response.json();
+    // console.log("refreshComments result:", result.comments);
     if (response.ok) setComments(result.comments || []);
   }
+
 
   const saveShortcutRef = useRef<() => void>(() => {});
 
@@ -386,6 +432,37 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  function commentsForClause(index: number) {
+    const id = clauseIds[index];
+    // new comments match by clauseId; older ones fall back to clauseIndex (assumed 1-based)
+    return comments.filter(c => (c.clauseId ? c.clauseId === id : c.clauseIndex === index + 1));
+  }
+
+  function openPanel() {
+    (document.activeElement as HTMLElement | null)?.blur(); // drop the caret / mobile keyboard
+    setActiveClause(null);
+    setPanelOpen(true);
+    void refreshComments();
+  }
+
+  // Escape closes whichever overlay is open
+  useEffect(() => {
+    if (!panelOpen && activeClause === null) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") { setPanelOpen(false); setActiveClause(null); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [panelOpen, activeClause]);
+
+  // lock page scroll behind the sheet
+  useEffect(() => {
+    if (!panelOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [panelOpen]);
 
   if (checkingSession || !user) return <ContractLoader />;
 
@@ -425,7 +502,16 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
         </div>
         <div className={styles.editorTools}>
           <button type="button" disabled={contractStatus === "executed"} className={styles.textButton} onClick={addClause}>+ Clause</button>
-          <button type="button" className={styles.textButton} onClick={refreshComments}>Comments · {comments.length}</button>
+          <button
+            type="button"
+            className={styles.textButton}
+            onClick={() => {
+              void refreshComments();
+              if (!window.matchMedia("(min-width: 1280px)").matches) openPanel();
+            }}
+          >
+            Comments · {comments.length}
+          </button>
         </div>
       </div>
 
@@ -443,7 +529,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
 
         <section className={styles.canvas} aria-label="Contract document">
           <div className="mx-auto flex w-full max-w-215 items-start gap-2">
-          <div className={`${styles.paper} flex-1`}>
+          <div className={`${styles.paper} relative flex-1`}>
             <div
               ref={editorRef}
               className={styles.document}
@@ -461,6 +547,57 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
               <hr className="my-7 border-0 border-t border-black/10 dark:border-white/10" />
               <ol className="min-h-105 list-decimal pl-7" />
             </div>
+
+            {clauses.map((clause, index) => {
+              const list = commentsForClause(index);
+              if (list.length === 0) return null;
+              const top = clausePositions[index] ?? 0;
+              const open = activeClause === index;
+
+              return (
+                <div key={clause}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveClause(open ? null : index)}
+                    style={{ top: top + 2 }}
+                    className="absolute right-1 z-[5] grid h-6 min-w-6 place-items-center rounded-full bg-[#8b2635] px-1.5 text-[10px] font-bold text-white shadow-md hover:bg-[#a8334a] sm:right-4 dark:bg-[#c1445a] dark:hover:bg-[#e0637a]"
+                    aria-label={`${list.length} comment${list.length > 1 ? "s" : ""} on clause ${clause}`}
+                    aria-expanded={open}
+                  >
+                    {list.length}
+                  </button>
+
+                  {open && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setActiveClause(null)} />
+                      <div
+                        role="dialog"
+                        aria-label={`Comments on clause ${clause}`}
+                        style={{ top: top + 30 }}
+                        className="absolute right-2 z-20 max-h-72 w-[min(300px,calc(100%-16px))] overflow-y-auto rounded-xl border border-[#8b2635]/25 bg-[#faf6f2] p-3 text-[#1a0f10] shadow-[0_12px_40px_rgba(15,7,8,0.25)] sm:right-4 dark:border-[#c1445a]/30 dark:bg-[#160b0c] dark:text-[#f0e8e8]"
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8b2635] dark:text-[#c1445a]">Clause {clause}</p>
+                          <button type="button" className={styles.closeButton} onClick={() => setActiveClause(null)} aria-label="Close comments">×</button>
+                        </div>
+                        {list.map(comment => (
+                          <div key={comment.id} className="mb-2.5 border-b border-black/10 pb-2.5 last:mb-0 last:border-0 last:pb-0 dark:border-white/10">
+                            <p className="text-[11px] font-bold text-[#8b2635] dark:text-[#e0637a]">
+                              {comment.authorName} <span className="font-normal text-black/40 dark:text-white/40">· {new Date(comment.createdAt).toLocaleString()}</span>
+                            </p>
+                            {comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[11px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}
+                            <p className="mt-1 text-xs leading-relaxed">{comment.body}</p>
+                          </div>
+                        ))}
+                        <button type="button" className="mt-2 text-[11px] font-semibold text-[#8b2635] dark:text-[#e0637a]" onClick={openPanel}>
+                          View all comments →
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {clauses.length > 0 && (
             <div className={`${styles.clauseRail} relative`} aria-label="Clause actions">
@@ -472,37 +609,28 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           </div>
         </section>
 
-        <aside className={styles.inspector}>
-          <p className={styles.eyebrow}>Parties</p>
-          <div className={styles.partyCard}><div className={styles.partyAvatar}>C</div><div><strong className="block text-xs font-semibold">{user.username}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Creator · You</span></div><i className={styles.statusDot} /></div>
-          {invitedEmail ? (
-            <div className={styles.partyCard}>
-              <div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div>
-              <div className="min-w-0 flex-1"><strong className="block truncate text-xs font-semibold">{invitedEmail}</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">{invitationStatus === "accepted" ? "Signed" : invitationStatus === "revoked" ? "Revoked" : "Pending"}</span></div>
-              {invitationStatus !== "accepted" && invitationStatus !== "revoked" && <button type="button" className="border-0 bg-transparent px-1 text-lg text-black/40 hover:text-[#8b2635] dark:text-white/40 dark:hover:text-[#e0637a]" onClick={revokeInvitation} title="Invalidate invitation link" aria-label="Invalidate invitation link">×</button>}
-            </div>
-          ) : (
-            <div className={styles.partyCard}><div className={`${styles.partyAvatar} ${styles.invitedAvatar}`}>+</div><div><strong className="block text-xs font-semibold">Invite someone</strong><span className="mt-0.5 block text-[10px] text-black/50 dark:text-white/50">Second signer</span></div></div>
-          )}
-          {!invitedEmail && <button type="button" className={styles.inspectorAction} onClick={() => openInvite("invite")}>＋ Add invited party</button>}
-          <div className={styles.inspectorRule} />
-          <p className={styles.eyebrow}>Document settings</p>
-          <div className={styles.setting}><span>Document status</span><strong className={contractStatus === "executed" ? "text-[#8b2635]" : styles.enabled}>{contractStatus === "executed" ? "Executed · Read only" : "Editable"}</strong></div>
-          <div className={styles.setting}><span>Signature order</span><strong>Any order</strong></div>
-          <div className={styles.setting}><span>Expiry</span><strong>Never</strong></div>
-          <div className={styles.setting}><span>Audit trail</span><strong className={styles.enabled}>Enabled</strong></div>
-          <div className={styles.inspectorRule} />
-          <div className="flex items-center justify-between"><p className={styles.eyebrow}>Review comments</p><button type="button" className="text-[10px] font-semibold text-[#8b2635]" onClick={() => void refreshComments()}>Refresh</button></div>
-          {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {comment.clauseId ? "Clause" : `Clause ${comment.clauseIndex ?? "?"}`}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
-        </aside>
+        <aside className={styles.inspector}>{partiesAndComments}</aside>
       </div>
 
       {inviteOpen && (
         <div className={styles.modalBackdrop} onMouseDown={event => { if (event.target === event.currentTarget) setInviteOpen(false); }}>
           <section className={styles.inviteModal} role="dialog" aria-modal="true" aria-labelledby="invite-title">
             <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Second signer</p><h2 id="invite-title" className="pactum-display m-0 text-[25px] font-bold">{inviteMode === "send" ? "Sign & send contract" : "Invite a party"}</h2></div><button type="button" className={styles.closeButton} onClick={() => setInviteOpen(false)} aria-label="Close invite dialog">×</button></div>
-            {inviteSent ? <div className={styles.inviteSuccess}>{inviteMode === "send" ? "Contract sent to" : "Invitation sent to"} <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>{inviteMode === "send" ? "The contract will be saved and the invited party will receive a secure review link." : "They will receive a secure review link and remain Pending until they sign."}</p>{inviteError && <p className="my-3 text-xs text-[#8b2635] dark:text-[#e0637a]">{inviteError}</p>}<button className={styles.primaryButton} type="submit">{inviteMode === "send" ? "Save and send" : "Send invitation"}</button></form>}
+            {inviteSent ? <div className={styles.inviteSuccess}>{inviteMode === "send" ? "Contract sent to" : "Invitation sent to"} <strong>{inviteEmail}</strong>.</div> : <form onSubmit={sendInvite}><label className={styles.formLabel} htmlFor="invite-email">Email address</label><input id="invite-email" className={styles.formInput} type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="partner@company.com" required /><p className={styles.formHint}>{inviteMode === "send" ? "The contract will be saved and the invited party will receive a secure review link." : "They will receive a secure review link and remain Pending until they sign."}</p>{inviteError && <p className="my-3 text-xs text-[#8b2635] dark:text-[#e0637a]">{inviteError}</p>}<button className={`${styles.primaryButton} disabled:opacity-50`} type="submit" disabled={inviteBusy}>
+              {inviteBusy ? "Sending..." : inviteMode === "send" ? "Save and send" : "Send invitation"}
+            </button></form>}
           </section>
+        </div>
+      )}
+      {panelOpen && (
+        <div className="fixed inset-0 z-20 xl:hidden" role="dialog" aria-modal="true" aria-label="Parties and comments">
+          <div className="absolute inset-0 bg-[#0f0708]/45" onClick={() => setPanelOpen(false)} />
+          <div className="absolute inset-x-0 bottom-0 max-h-[75dvh] overflow-y-auto rounded-t-2xl border-t border-black/10 bg-[#faf6f2] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(15,7,8,0.25)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[340px] sm:rounded-none sm:border-l sm:border-t-0 dark:border-white/10 dark:bg-[#160b0c]">
+            <div className="mb-4 flex items-center">
+              <button type="button" className={`${styles.closeButton} ml-auto`} onClick={() => setPanelOpen(false)} aria-label="Close panel">×</button>
+            </div>
+            {partiesAndComments}
+          </div>
         </div>
       )}
     </main>
