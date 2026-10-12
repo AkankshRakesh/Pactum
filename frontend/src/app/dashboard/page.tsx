@@ -184,7 +184,23 @@ const recents = [
   { id: "PA-2026-0580", title: "Content Strategy Retainer",      edited: "2 months ago",   color: "#F4ECE4", dark: false },
 ];
 
-const TABS = ["Recently viewed", "Invited", "Shared contracts", "Archived"];
+const VIEWS = ["All", "Recently viewed", "Invited", "Shared contracts", "Archived"] as const;
+type View = typeof VIEWS[number];
+
+const RECENT_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+const EMPTY_MESSAGES: Record<View, string> = {
+  "All": "No contracts yet.",
+  "Recently viewed": "Nothing edited in the last 2 days.",
+  "Invited": "No contracts have been invited to your account.",
+  "Shared contracts": "You haven't created any contracts yet.",
+  "Archived": "No signed contracts yet.",
+};
+
+type DashboardContract = {
+  id: string; title: string; edited: string; updatedAt: number; status: string;
+  color: string; dark: boolean; bodyHtml?: string; source: "owned" | "invited";
+};
 
 function useViewport() {
   const [width, setWidth] = useState(1280);
@@ -206,15 +222,13 @@ export default function Dashboard() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [dark, setDark] = useState(false);
   const [showBanner, setShowBanner]   = useState(true);
-  const [activeTab, setActiveTab]     = useState(0);
   const [viewMode, setViewMode]       = useState<"grid" | "list">("grid");
-  const [filterOrg, setFilterOrg]     = useState("All clients");
-  const [filterType, setFilterType]   = useState("All types");
   const [search, setSearch]           = useState("");
-  const [savedContracts, setSavedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "owned" }>>([]);
-  const [invitedContracts, setInvitedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "invited" }>>([]);
   const [contractsLoaded, setContractsLoaded] = useState(false);
   const { confirm, dialog } = useConfirm();
+  const [view, setView] = useState<View>("All");
+  const [savedContracts, setSavedContracts] = useState<DashboardContract[]>([]);
+  const [invitedContracts, setInvitedContracts] = useState<DashboardContract[]>([]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -249,6 +263,8 @@ export default function Dashboard() {
             id: contract.id,
             title: contract.title,
             edited: new Date(contract.updatedAt).toLocaleDateString(),
+            updatedAt: new Date(contract.updatedAt).getTime(),
+            status: contract.status,
             color: contract.status === "sent" ? "#2A1117" : "#F0EBE3",
             dark: contract.status === "sent",
             bodyHtml: contract.bodyHtml,
@@ -337,6 +353,7 @@ export default function Dashboard() {
     "--d-border":        "rgba(240,232,232,0.08)",
     "--d-border-strong": "rgba(240,232,232,0.15)",
     "--d-sidebar":       "#100709",
+    "--d-select-bg": "#1b1011",
   } : {
     "--d-bg":            "#FAF6F2",
     "--d-surface":       "#F4ECE4",
@@ -352,15 +369,26 @@ export default function Dashboard() {
     "--d-border":        "rgba(26,15,16,0.08)",
     "--d-border-strong": "rgba(26,15,16,0.15)",
     "--d-sidebar":       "#F0E8E4",
+    "--d-select-bg": "#fffdfb",
   };
 
-  const filteredRecents = savedContracts.filter(r =>
-    search === "" || r.title.toLowerCase().includes(search.toLowerCase())
-  );
-  const filteredInvited = invitedContracts.filter(r =>
-    search === "" || r.title.toLowerCase().includes(search.toLowerCase())
-  );
-  const displayedContracts = activeTab === 1 ? filteredInvited : activeTab === 0 ? filteredRecents : [];
+  const now = Date.now();
+  const allContracts = [
+    ...savedContracts,
+    ...invitedContracts.filter(invited => !savedContracts.some(owned => owned.id === invited.id)),
+  ];
+
+  const byView: Record<View, DashboardContract[]> = {
+    "All": allContracts,
+    "Recently viewed": allContracts.filter(c => now - c.updatedAt <= RECENT_MS),
+    "Invited": invitedContracts,
+    "Shared contracts": savedContracts,
+    "Archived": allContracts.filter(c => c.status === "executed"),
+  };
+
+  const displayedContracts = byView[view]
+    .filter(c => search === "" || c.title.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
     <div
@@ -554,114 +582,60 @@ export default function Dashboard() {
 
         {/* ── FILE BROWSER ── */}
         {/* toolbar row */}
-        <div style={{
-          display: "flex",
-          flexDirection: isTablet ? "column" : "row",
-          alignItems: isTablet ? "stretch" : "center",
-          justifyContent: "space-between",
-          gap: 12, marginBottom: 16,
-        }}>
-          {/* tabs: scroll instead of overflowing */}
-          <div style={{ display: "flex", gap: 0, overflowX: "auto", whiteSpace: "nowrap" }}>
-            {TABS.map((tab, i) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(i)}
-                style={{
-                  padding: "7px 16px",
-                  background: "transparent", border: "none",
-                  color: activeTab === i ? P.text : P.textMuted,
-                  fontFamily: "'DM Sans', Arial, sans-serif",
-                  fontSize: 13, fontWeight: activeTab === i ? 600 : 400,
-                  cursor: "pointer",
-                  borderBottom: `2px solid ${activeTab === i ? P.accent : "transparent"}`,
-                  transition: "all 0.15s",
-                  paddingLeft: i === 0 ? 0 : 16,
-                }}
-              >{tab}</button>
-            ))}
-          </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+        <select
+          value={view}
+          onChange={e => setView(e.target.value as View)}
+          aria-label="Filter contracts"
+          style={{
+            padding: "6px 28px 6px 10px",
+            background: "var(--d-select-bg)",
+            colorScheme: dark ? "dark" : "light",
+            border: `1px solid ${P.borderStrong}`,
+            borderRadius: 6,
+            color: P.text,
+            fontSize: 12,
+            fontFamily: "'DM Sans', Arial, sans-serif",
+            cursor: "pointer",
+            outline: "none",
+            appearance: "none",
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "right 8px center",
+          }}
+        >
+          {VIEWS.map(v => (
+            <option key={v} value={v} style={{ background: "var(--d-select-bg)", color: P.text }}>{v}</option>
+          ))}
+        </select>
 
-          {/* right controls */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {/* org filter */}
-            <select
-              value={filterOrg}
-              onChange={e => setFilterOrg(e.target.value)}
+        {/* view toggle: unchanged */}
+        <div style={{ display: "flex", border: `1px solid ${P.border}`, borderRadius: 6, overflow: "hidden" }}>
+          {(["grid", "list"] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
               style={{
-                padding: "6px 28px 6px 10px",
-                background: P.card,
-                border: `1px solid ${P.border}`,
-                borderRadius: 6,
-                color: P.textSub,
-                fontSize: 12,
-                fontFamily: "'DM Sans', Arial, sans-serif",
+                width: 32, height: 30,
+                background: viewMode === mode ? P.accentMuted : "transparent",
+                border: "none",
+                color: viewMode === mode ? P.accent : P.textMuted,
                 cursor: "pointer",
-                outline: "none",
-                appearance: "none",
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                backgroundRepeat: "no-repeat",
-                backgroundPosition: "right 8px center",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, transition: "all 0.15s",
               }}
             >
-              <option>All clients</option>
-              <option>Holloway Creative</option>
-              <option>Vantage Labs</option>
-              <option>Meridian Health</option>
-            </select>
-
-            {/* type filter */}
-            <select
-              value={filterType}
-              onChange={e => setFilterType(e.target.value)}
-              style={{
-                padding: "6px 28px 6px 10px",
-                background: P.card,
-                border: `1px solid ${P.border}`,
-                borderRadius: 6,
-                color: P.textSub,
-                fontSize: 12,
-                fontFamily: "'DM Sans', Arial, sans-serif",
-                cursor: "pointer",
-                outline: "none",
-                appearance: "none",
-                backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                backgroundRepeat: "no-repeat",
-                backgroundPosition: "right 8px center",
-              }}
-            >
-              <option>All types</option>
-              <option>Service Agreement</option>
-              <option>NDA</option>
-              <option>Retainer</option>
-            </select>
-
-            {/* view toggle */}
-            <div style={{ display: "flex", border: `1px solid ${P.border}`, borderRadius: 6, overflow: "hidden", marginLeft: isTablet ? "auto" : 0 }}>
-              {(["grid","list"] as const).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  style={{
-                    width: 32, height: 30,
-                    background: viewMode === mode ? P.accentMuted : "transparent",
-                    border: "none",
-                    color: viewMode === mode ? P.accent : P.textMuted,
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 14, transition: "all 0.15s",
-                  }}
-                >
-                  {mode === "grid" ? "⊞" : "☰"}
-                </button>
-              ))}
-            </div>
-          </div>
+              {mode === "grid" ? "⊞" : "☰"}
+            </button>
+          ))}
         </div>
+      </div>
 
         {/* grid */}
         {displayedContracts.length === 0 ? (
-          <div style={{ padding: "56px 20px", textAlign: "center", color: P.textMuted, fontSize: 13 }}>{activeTab === 1 ? "No contracts have been invited to your account." : "No contracts to display."}</div>
+          <div style={{ padding: "56px 20px", textAlign: "center", color: P.textMuted, fontSize: 13 }}>
+            {search ? "No contracts match your search." : EMPTY_MESSAGES[view]}
+          </div>
         ) : viewMode === "grid" ? (
           <div style={{
             display: "grid",
