@@ -586,6 +586,8 @@ def _comment_data(comment):
         "authorUserId": comment.author_user_id,
         "body": comment.body,
         "createdAt": comment.created_at.isoformat(),
+        "status": comment.status,
+        "statusChangedAt": comment.status_changed_at.isoformat() if comment.status_changed_at else None,
     }
 
 
@@ -683,7 +685,11 @@ def contract_review(request, contract_id):
     contract = _reviewable_contract_for_user(request, contract_id)
     if not contract:
         return JsonResponse({"detail": "Contract not found."}, status=404)
-    return JsonResponse({"contract": _contract_data(contract, include_body=True), "reviewOnly": contract.creator_id != request.user.id})
+    return JsonResponse({
+        "contract": _contract_data(contract, include_body=True),
+        "reviewOnly": contract.creator_id != request.user.id,
+        "currentUserId": request.user.id,
+    })
 
 
 @require_POST
@@ -1009,3 +1015,55 @@ def contract_sign(request, contract_id):
         contract.status = Contract.Status.EXECUTED
         contract.save(update_fields=["status", "updated_at"])
     return JsonResponse({"detail": "Contract signed successfully.", "status": "accepted"})
+
+
+@require_POST
+def contract_comment_status(request, contract_id, comment_id):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    try:
+        contract = request.user.contracts.get(id=contract_id)   # creator only
+    except (Contract.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+    if contract.status == Contract.Status.EXECUTED:
+        return JsonResponse({"detail": "Executed contracts cannot be changed."}, status=409)
+
+    data, error = _json_body(request)
+    if error:
+        return error
+    new_status = str(data.get("status", "")).strip().lower()
+    if new_status not in ContractComment.Status.values:
+        return JsonResponse({"detail": "Status must be pending, resolved or rejected."}, status=400)
+
+    try:
+        comment = contract.comments.get(id=comment_id)
+    except ContractComment.DoesNotExist:
+        return JsonResponse({"detail": "Comment not found."}, status=404)
+
+    comment.status = new_status
+    comment.status_changed_at = timezone.now()
+    comment.save(update_fields=["status", "status_changed_at"])
+    return JsonResponse({"comment": _comment_data(comment)})
+
+
+@require_http_methods(["DELETE"])
+def contract_comment_delete(request, contract_id, comment_id):
+    error = _require_authenticated(request)
+    if error:
+        return error
+
+    contract = _reviewable_contract_for_user(request, contract_id)
+    if not contract:
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+    if contract.status == Contract.Status.EXECUTED:
+        return JsonResponse({"detail": "Comments cannot be removed after execution."}, status=409)
+
+    try:
+        comment = contract.comments.get(id=comment_id, author_user=request.user)
+    except ContractComment.DoesNotExist:
+        return JsonResponse({"detail": "Comment not found."}, status=404)
+
+    comment.delete()   # status is intentionally not checked: pending, resolved and rejected can all be deleted
+    return JsonResponse({"deleted": comment_id})

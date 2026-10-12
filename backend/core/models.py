@@ -61,3 +61,11 @@ class ContractComment(models.Model):
 
     class Meta:
         ordering = ("created_at",)
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RESOLVED = "resolved", "Resolved"
+        REJECTED = "rejected", "Rejected"
+
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    status_changed_at = models.DateTimeField(null=True, blank=True)

@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { CommentStatusActions, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
 import ContractLoader from "../app/ContractLoader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
 type User = { id: number; username: string; email: string };
-type ContractComment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; body: string; createdAt: string };
+type ContractComment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; body: string; createdAt: string; status?: CommentStatus };
 type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: ContractComment[] };
 type Format = "bold" | "italic" | "underline" | "insertUnorderedList";
 
@@ -99,6 +100,32 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [clauseIds, setClauseIds] = useState<string[]>([]);       // data-clause-id per <li>, by index
   const [inviteBusy, setInviteBusy] = useState(false);
   const inviteInFlight = useRef(false);
+  const [statusBusy, setStatusBusy] = useState<number | null>(null);
+
+  async function setCommentStatus(comment: ContractComment, requested: CommentStatus) {
+    if (!contractId || contractStatus === "executed") return;
+    const previous = comment.status ?? "pending";
+    const next: CommentStatus = previous === requested ? "pending" : requested;
+
+    setStatusBusy(comment.id);
+    setComments(current => current.map(c => (c.id === comment.id ? { ...c, status: next } : c)));
+    try {
+      const response = await fetch(`${API_BASE}/api/contracts/${contractId}/comments/${comment.id}/status/`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": await getCsrfToken() },
+        body: JSON.stringify({ status: next }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "Unable to update comment status.");
+      setComments(current => current.map(c => (c.id === comment.id ? (result.comment as ContractComment) : c)));
+    } catch (error) {
+      setComments(current => current.map(c => (c.id === comment.id ? { ...c, status: previous } : c)));
+      setSavedState(error instanceof Error ? error.message : "Unable to update comment status.");
+    } finally {
+      setStatusBusy(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -331,7 +358,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     <div className={styles.setting}><span>Audit trail</span><strong className={styles.enabled}>Enabled</strong></div>
     <div className={styles.inspectorRule} />
     <div className="flex items-center justify-between"><p className={styles.eyebrow}>Review comments</p><button type="button" className="text-[10px] font-semibold text-[#8b2635]" onClick={() => void refreshComments()}>Refresh</button></div>
-    {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {commentClauseLabel(comment)}</p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p></div>)}
+    {comments.length === 0 ? <p className="text-xs leading-relaxed text-black/40 dark:text-white/40">No comments yet.</p> : comments.map(comment => <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5"><p className="text-[10px] font-bold text-[#8b2635]">{comment.authorName} · {commentClauseLabel(comment)} <CommentStatusBadge status={comment.status} /></p><p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>{comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}<p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p>{commentStatusRow(comment)}</div>)}
     </>
   );
 
@@ -470,6 +497,12 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
       return currentIndex >= 0 ? `Clause ${currentIndex + 1}` : "Deleted or unavailable clause";
     }
     return "Legacy comment · clause position unavailable";
+  }
+
+  function commentStatusRow(comment: ContractComment) {
+    return contractStatus === "executed"
+      ? <div className="mt-2"><CommentStatusBadge status={comment.status} /></div>
+      : <CommentStatusActions status={comment.status} busy={statusBusy === comment.id} onChange={next => void setCommentStatus(comment, next)} />;
   }
 
   function openPanel() {
@@ -617,10 +650,11 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
                         {list.map(comment => (
                           <div key={comment.id} className="mb-2.5 border-b border-black/10 pb-2.5 last:mb-0 last:border-0 last:pb-0 dark:border-white/10">
                             <p className="text-[11px] font-bold text-[#8b2635] dark:text-[#e0637a]">
-                              {comment.authorName} <span className="font-normal text-black/40 dark:text-white/40">· {new Date(comment.createdAt).toLocaleString()}</span>
+                              {comment.authorName} <span className="font-normal text-black/40 dark:text-white/40">· {new Date(comment.createdAt).toLocaleString()}</span> <CommentStatusBadge status={comment.status} />
                             </p>
                             {comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[11px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}
                             <p className="mt-1 text-xs leading-relaxed">{comment.body}</p>
+                            {commentStatusRow(comment)}
                           </div>
                         ))}
                         <button type="button" className="mt-2 text-[11px] font-semibold text-[#8b2635] dark:text-[#e0637a]" onClick={openPanel}>

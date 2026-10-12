@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
+import { CommentDeleteButton, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
-type Comment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; body: string; createdAt: string };
+type Comment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; authorUserId?: number | null; body: string; createdAt: string; status?: CommentStatus };
 type Contract = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: Comment[] };
 type ClauseBox = { id: string; top: number; height: number };
 
@@ -82,6 +84,8 @@ export default function ContractReview({ contractId }: { contractId: string }) {
   const paperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // ── load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -92,6 +96,7 @@ export default function ContractReview({ contractId }: { contractId: string }) {
         const result = await readResponse(response);
         if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Unable to load contract (${response.status}).`);
         setContract(result.contract as Contract);
+        setCurrentUserId(typeof result.currentUserId === "number" ? result.currentUserId : null);
       } catch (error) {
         if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Unable to load contract.");
       } finally {
@@ -218,6 +223,36 @@ export default function ContractReview({ contractId }: { contractId: string }) {
     }
   }
 
+  async function deleteComment(comment: Comment) {
+    if (!editable || deletingId !== null) return;
+    if (!window.confirm("Delete this comment? This cannot be undone.")) return;
+    setDeletingId(comment.id);
+    setActionError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/contracts/${contractId}/comments/${comment.id}/`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "X-CSRFToken": await csrfToken() },
+      });
+      const result = await readResponse(response);
+      if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Unable to delete comment (${response.status}).`);
+      setContract(current => current ? { ...current, comments: (current.comments || []).filter(c => c.id !== comment.id) } : current);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Unable to delete comment.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function deleteControl(comment: Comment) {
+    if (!editable || comment.authorUserId == null || comment.authorUserId !== currentUserId) return null;
+    return (
+      <div className="mt-2 flex gap-1.5">
+        <CommentDeleteButton busy={deletingId === comment.id} onClick={() => void deleteComment(comment)} />
+      </div>
+    );
+  }
+
   // ── early returns (after all hooks) ───────────────────────────────
   if (loading) return <main className={`${styles.workspace} grid place-items-center text-sm`}>Loading contract…</main>;
   if (loadError || !contract) {
@@ -254,12 +289,17 @@ export default function ContractReview({ contractId }: { contractId: string }) {
       ) : comments.map(comment => {
         const index = clauseIndexOf(comment);
         return (
-          <button key={comment.id} type="button" disabled={index < 0} onClick={() => jumpTo(index)} className="mb-3 block w-full rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5 text-left disabled:cursor-default">
-            <p className="text-[10px] font-bold text-[#8b2635] dark:text-[#e0637a]">{comment.authorName} · {index >= 0 ? `Clause ${index + 1}` : "Removed clause"}</p>
-            <p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>
-            {comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}
-            <p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p>
-          </button>
+          <div key={comment.id} className="mb-3 rounded-md border border-[#8b2635]/15 bg-[#8b2635]/5 p-2.5">
+            <button type="button" disabled={index < 0} onClick={() => jumpTo(index)} className="block w-full text-left disabled:cursor-default">
+              <p className="text-[10px] font-bold text-[#8b2635] dark:text-[#e0637a]">
+                {comment.authorName} · {index >= 0 ? `Clause ${index + 1}` : "Removed clause"} <CommentStatusBadge status={comment.status} />
+              </p>
+              <p className="text-[9px] text-black/40 dark:text-white/40">{new Date(comment.createdAt).toLocaleString()}</p>
+              {comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[10px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}
+              <p className="mt-1 text-[11px] leading-relaxed">{comment.body}</p>
+            </button>
+            {deleteControl(comment)}
+          </div>
         );
       })}
     </>
@@ -380,10 +420,11 @@ export default function ContractReview({ contractId }: { contractId: string }) {
                           {list.map(comment => (
                             <div key={comment.id} className="mb-2.5 border-b border-black/10 pb-2.5 dark:border-white/10">
                               <p className="text-[11px] font-bold text-[#8b2635] dark:text-[#e0637a]">
-                                {comment.authorName} <span className="font-normal text-black/40 dark:text-white/40">· {new Date(comment.createdAt).toLocaleString()}</span>
+                                {comment.authorName} <span className="font-normal text-black/40 dark:text-white/40">· {new Date(comment.createdAt).toLocaleString()}</span> <CommentStatusBadge status={comment.status} />
                               </p>
                               {comment.quotedText && <p className="mt-1 border-l-2 border-[#8b2635]/30 pl-2 text-[11px] italic text-black/50 dark:text-white/50">“{comment.quotedText}”</p>}
                               <p className="mt-1 text-xs leading-relaxed">{comment.body}</p>
+                              {deleteControl(comment)}
                             </div>
                           ))}
 
