@@ -1,7 +1,9 @@
 'use client';
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+
 import ContractLoader from "../ContractLoader";
+import { useConfirm } from "../../components/ConfirmDialog";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
@@ -212,6 +214,7 @@ export default function Dashboard() {
   const [savedContracts, setSavedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "owned" }>>([]);
   const [invitedContracts, setInvitedContracts] = useState<Array<{ id: string; title: string; edited: string; color: string; dark: boolean; bodyHtml?: string; source: "invited" }>>([]);
   const [contractsLoaded, setContractsLoaded] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -296,7 +299,15 @@ export default function Dashboard() {
   }
 
   async function handleDeleteContract(id: string) {
-    if (!window.confirm("Delete this contract permanently?")) return;
+    const name = savedContracts.find(contract => contract.id === id)?.title || "this contract";
+    const ok = await confirm({
+      eyebrow: "Delete contract",
+      title: "Delete this contract?",
+      message: <><strong>{name}</strong> will be permanently deleted. This can't be undone.</>,
+      confirmLabel: "Delete permanently",
+      tone: "danger",
+    });
+    if (!ok) return;
 
     const csrfToken = await fetch(`${API_BASE}/api/auth/csrf/`, { credentials: "include" })
       .then(response => response.json())
@@ -770,6 +781,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+      {dialog}
     </div>
   );
 }

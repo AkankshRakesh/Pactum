@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { CommentStatusActions, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
 import ContractLoader from "../app/ContractLoader";
+import { useConfirm } from "./ConfirmDialog";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
@@ -24,7 +25,7 @@ const styles = {
   documentTitleInput: "w-full border-0 bg-transparent text-center text-sm font-semibold text-[#1a0f10] outline-none dark:text-[#f0e8e8]",
   saveStatus: "text-[10px] text-black/50 dark:text-white/50",
   appActions: "flex items-center gap-2.5",
-  ghostButton: "hidden rounded-md border border-black/10 bg-transparent px-3.5 py-2 text-xs font-semibold hover:border-[#8b2635] hover:text-[#8b2635] dark:border-white/10 dark:hover:border-[#c1445a] dark:hover:text-[#e0637a] sm:block",
+  ghostButton: "rounded-md border border-black/10 bg-transparent px-3.5 py-2 text-xs font-semibold hover:border-[#8b2635] hover:text-[#8b2635] dark:border-white/10 dark:hover:border-[#c1445a] dark:hover:text-[#e0637a] sm:block",
   primaryButton: "rounded-md border border-transparent bg-[#8b2635] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#a8334a] dark:bg-[#c1445a] dark:hover:bg-[#e0637a]",
   avatar: "grid h-8 w-8 place-items-center rounded-full border border-[#8b2635] bg-[#8b2635]/10 text-xs font-bold text-[#8b2635] dark:border-[#c1445a] dark:bg-[#c1445a]/10 dark:text-[#c1445a]",
   editorBar: "flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-black/10 bg-[#faf6f2] px-3 dark:border-white/10 dark:bg-[#160b0c]",
@@ -101,6 +102,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const [inviteBusy, setInviteBusy] = useState(false);
   const inviteInFlight = useRef(false);
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   async function setCommentStatus(comment: ContractComment, requested: CommentStatus) {
     if (!contractId || contractStatus === "executed") return;
@@ -442,7 +444,15 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   }
 
   async function revokeInvitation() {
-    if (!contractId || !window.confirm("Invalidate this invitation link?")) return;
+    if (!contractId) return;
+    const ok = await confirm({
+    eyebrow: "Invitation",
+    title: "Invalidate this link?",
+    message: <>The link sent to <strong>{invitedEmail}</strong> stops working immediately. You can invite them again later.</>,
+    confirmLabel: "Invalidate link",
+    tone: "danger",
+    });
+    if (!ok) return;
     try {
       const response = await fetch(`${API_BASE}/api/contracts/${contractId}/invitation/revoke/`, {
         method: "POST",
@@ -544,8 +554,24 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           <span className={styles.saveStatus}>{savedState}</span>
         </div>
         <div className={styles.appActions}>
-          <button className={styles.ghostButton} type="button" disabled={contractStatus === "executed"} onClick={handleSaveContract}>Save contract</button>
-          <button className={styles.ghostButton} type="button" disabled={contractStatus === "executed"} onClick={() => openInvite("invite")}>Invite party</button>
+          
+          <button
+              className={styles.ghostButton}
+              type="button"
+              disabled={contractStatus === "executed"}
+              onClick={() => {
+                if (window.matchMedia("(min-width: 1280px)").matches) {
+                  void handleSaveContract();
+                } else {
+                  void refreshComments();
+                  openPanel();
+                }
+              }}
+            >
+              <span className="hidden xl:inline">Save contract</span>
+              <span className="xl:hidden">View details</span>
+          </button>
+          {/* <button className={styles.ghostButton} type="button" disabled={contractStatus === "executed"} onClick={() => openInvite("invite")}>Invite party</button> */}
         </div>
       </header>
 
@@ -701,6 +727,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           </div>
         </div>
       )}
+      {dialog}
     </main>
   );
 }

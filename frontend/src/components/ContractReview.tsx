@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation";
 
 import { CommentDeleteButton, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
+import { useConfirm } from "./ConfirmDialog";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
 
@@ -86,6 +87,7 @@ export default function ContractReview({ contractId }: { contractId: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   // ── load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -203,7 +205,13 @@ export default function ContractReview({ contractId }: { contractId: string }) {
 
   async function signContract() {
     if (!contract || !editable || signing) return;
-    if (!window.confirm("Sign this contract? This is final and cannot be undone.")) return;
+    const ok = await confirm({
+      eyebrow: "Final step",
+      title: "Sign this contract?",
+      message: "Signing is final. The contract will be executed and can no longer be edited or commented on.",
+      confirmLabel: "Sign contract",
+    });
+    if (!ok) return;
     setSigning(true);
     setActionError("");
     try {
@@ -225,7 +233,14 @@ export default function ContractReview({ contractId }: { contractId: string }) {
 
   async function deleteComment(comment: Comment) {
     if (!editable || deletingId !== null) return;
-    if (!window.confirm("Delete this comment? This cannot be undone.")) return;
+    const ok = await confirm({
+      eyebrow: "Delete comment",
+      title: "Delete this comment?",
+      message: "It will be removed for everyone on this contract, whatever its status. This can't be undone.",
+      confirmLabel: "Delete comment",
+      tone: "danger",
+    });
+    if (!ok) return;
     setDeletingId(comment.id);
     setActionError("");
     try {
@@ -472,6 +487,7 @@ export default function ContractReview({ contractId }: { contractId: string }) {
           </div>
         </div>
       )}
+      {dialog}
     </main>
   );
 }
