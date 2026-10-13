@@ -43,7 +43,7 @@ pipeline {
         powershell '''
           $ErrorActionPreference = 'Stop'
 
-          foreach ($tool in @('aws','kubectl','docker','helm','eksctl','trivy','npm')) {
+          foreach ($tool in @('aws','kubectl','docker','eksctl','trivy','npm')) {
             if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
               throw "Missing required tool: $tool"
             }
@@ -90,6 +90,22 @@ pipeline {
 
           echo "Image tag: ${env.IMAGE_TAG}"
         }
+      }
+    }
+
+    stage('Build Helm Docker image') {
+      steps {
+        powershell '''
+          $ErrorActionPreference = 'Stop'
+
+          docker build `
+            -t pactum-helm-aws:latest `
+            infra/jenkins-tools/helm-aws
+
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to build Helm Docker image'
+          }
+        '''
       }
     }
 
@@ -319,17 +335,17 @@ pipeline {
                 throw 'Could not create ALB controller service account'
               }
 
-              helm repo add eks https://aws.github.io/eks-charts
+              .\scripts\helm-docker.ps1 repo add eks https://aws.github.io/eks-charts
               if ($LASTEXITCODE -ne 0) {
                 throw 'Could not add EKS Helm repository'
               }
 
-              helm repo update
+              .\scripts\helm-docker.ps1 repo update
               if ($LASTEXITCODE -ne 0) {
                 throw 'Helm repo update failed'
               }
 
-              helm upgrade --install aws-load-balancer-controller `
+              .\scripts\helm-docker.ps1 upgrade --install aws-load-balancer-controller `
                 eks/aws-load-balancer-controller `
                 --namespace kube-system `
                 --set "clusterName=$env:CLUSTER_NAME" `
@@ -554,19 +570,19 @@ pipeline {
         powershell '''
           $ErrorActionPreference = 'Stop'
 
-          helm repo add prometheus-community `
+          .\scripts\helm-docker.ps1 repo add prometheus-community `
             https://prometheus-community.github.io/helm-charts
 
           if ($LASTEXITCODE -ne 0) {
             throw 'Could not add Prometheus repo'
           }
 
-          helm repo update
+          .\scripts\helm-docker.ps1 repo update
           if ($LASTEXITCODE -ne 0) {
             throw 'Helm repo update failed'
           }
 
-          helm upgrade --install kube-prometheus-stack `
+          .\scripts\helm-docker.ps1 upgrade --install kube-prometheus-stack `
             prometheus-community/kube-prometheus-stack `
             --namespace monitoring `
             --create-namespace `
