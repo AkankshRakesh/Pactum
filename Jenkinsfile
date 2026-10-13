@@ -89,17 +89,18 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        $token = $env:DOCKERHUB_PASS
-                        $bytes = [System.Text.Encoding]::UTF8.GetBytes($token)
-                        $sha = [System.Security.Cryptography.SHA256]::Create()
-                        $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "")
+                        $ErrorActionPreference = "Stop"
                 
-                        Write-Host "Username: $env:DOCKERHUB_USER"
-                        Write-Host "Token length: $($token.Length)"
-                        Write-Host "Token SHA256: $hash"
+                        $env:DOCKERHUB_PASS |
+                            docker login `
+                                --username $env:DOCKERHUB_USER `
+                                --password-stdin
                 
-                        $token = $null
-                        $env:DOCKERHUB_PASS = $null
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Docker Hub authentication failed."
+                        }
+                
+                        Write-Host "Docker Hub authentication succeeded."
                     '''
                 }
             }
