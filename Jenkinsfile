@@ -79,72 +79,30 @@ pipeline {
             }
         }
 
-        
-stage('Build and Push Images') {
-    steps {
-        withCredentials([
-            usernamePassword(
-                credentialsId: 'docker-hub-pactum',
-                usernameVariable: 'DOCKERHUB_USER',
-                passwordVariable: 'DOCKERHUB_PASS'
-            )
-        ]) {
-            powershell '''
-                $ErrorActionPreference = "Stop"
+        stage('Build and Push Images') {
+            steps {
+                withCredentials([
+                      usernamePassword(
+                          credentialsId: 'docker-hub-pactum',
+                          usernameVariable: 'DOCKERHUB_USER',
+                          passwordVariable: 'DOCKERHUB_PASS'
+                      )
+                  ]) {
+                      powershell '''
+                          $ErrorActionPreference = "Stop"
 
-                $user = [string]$env:DOCKERHUB_USER
-                $pass = [string]$env:DOCKERHUB_PASS
+                          Write-Host "Docker Hub username configured in Jenkins: $env:DOCKERHUB_USER $env:DOCKERHUB_PASS"
 
-                Write-Host "Docker username: [$user]"
-                Write-Host "Username length: $($user.Length)"
-                Write-Host "Token length: $($pass.Length)"
-                Write-Host "Token has leading/trailing whitespace: $($pass -ne $pass.Trim())"
+                          $env:DOCKERHUB_PASS |
+                              docker login --username $env:DOCKERHUB_USER --password-stdin
 
-                if ([string]::IsNullOrWhiteSpace($user)) {
-                    throw "Docker Hub username is empty in Jenkins."
-                }
-
-                if ([string]::IsNullOrEmpty($pass)) {
-                    throw "Docker Hub token is empty in Jenkins."
-                }
-
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = (Get-Command docker.exe -ErrorAction Stop).Source
-                $psi.Arguments = "login --username `"$user`" --password-stdin"
-                $psi.UseShellExecute = $false
-                $psi.RedirectStandardInput = $true
-                $psi.RedirectStandardOutput = $true
-                $psi.RedirectStandardError = $true
-                $psi.CreateNoWindow = $true
-
-                $proc = New-Object System.Diagnostics.Process
-                $proc.StartInfo = $psi
-
-                if (-not $proc.Start()) {
-                    throw "Could not start Docker CLI."
-                }
-
-                # Write the exact secret without PowerShell pipeline formatting.
-                $proc.StandardInput.Write($pass)
-                $proc.StandardInput.Close()
-
-                $stdout = $proc.StandardOutput.ReadToEnd()
-                $stderr = $proc.StandardError.ReadToEnd()
-                $proc.WaitForExit()
-
-                if ($stdout) { Write-Host $stdout }
-                if ($stderr) { Write-Host $stderr }
-
-                if ($proc.ExitCode -ne 0) {
-                    throw "Docker Hub login failed with exit code $($proc.ExitCode)."
-                }
-
-                Write-Host "Docker Hub authentication succeeded."
-            '''
+                          if ($LASTEXITCODE -ne 0) {
+                              throw "Docker Hub login failed. Check the Jenkins credential."
+                          }
+                      '''
+                  }
+            }
         }
-    }
-}
-
 
         stage('Provision AWS with CloudFormation') {
             steps {
