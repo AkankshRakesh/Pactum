@@ -89,41 +89,15 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        $ErrorActionPreference = 'Stop'
+                        $ErrorActionPreference = "Stop"
 
-                        $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
-                        $frontendTag = '{0}/pactum-frontend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        Write-Host "Docker Hub username configured in Jenkins: $env:DOCKERHUB_USER"
 
-                        $env:DOCKERHUB_PASS | docker login -u $env:DOCKERHUB_USER --password-stdin
+                        $env:DOCKERHUB_PASS |
+                            docker login --username $env:DOCKERHUB_USER --password-stdin
+
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Docker Hub login failed.'
-                        }
-
-                        try {
-                            docker build --target runtime -t $backendTag backend
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image build failed. Verify backend/Dockerfile has a runtime target.'
-                            }
-
-                            docker build -t $frontendTag `
-                                --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" `
-                                frontend
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image build failed.'
-                            }
-
-                            docker push $backendTag
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image push failed.'
-                            }
-
-                            docker push $frontendTag
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image push failed.'
-                            }
-                        }
-                        finally {
-                            docker logout
+                            throw "Docker Hub login failed. Check the Jenkins credential."
                         }
                     '''
                 }
