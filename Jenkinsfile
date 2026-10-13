@@ -82,25 +82,18 @@ pipeline {
         stage('Build and Push Images') {
             steps {
                 withCredentials([
-                      usernamePassword(
-                          credentialsId: 'docker-hub-pactum',
-                          usernameVariable: 'DOCKERHUB_USER',
-                          passwordVariable: 'DOCKERHUB_PASS'
-                      )
-                  ]) {
-                      powershell '''
-                          $ErrorActionPreference = "Stop"
-
-                          Write-Host "Docker Hub username configured in Jenkins: $env:DOCKERHUB_USER $env:DOCKERHUB_PASS"
-
-                          $env:DOCKERHUB_PASS |
-                              docker login --username $env:DOCKERHUB_USER --password-stdin
-
-                          if ($LASTEXITCODE -ne 0) {
-                              throw "Docker Hub login failed. Check the Jenkins credential."
-                          }
-                      '''
-                  }
+                  usernamePassword(
+                      credentialsId: 'docker-hub',
+                      usernameVariable: 'DOCKERHUB_USER',
+                      passwordVariable: 'DOCKERHUB_PASS'
+                  )
+              ]) {
+                  bat '''
+                      @echo off
+                      echo %DOCKERHUB_PASS% | docker login -u %DOCKERHUB_USER% --password-stdin
+                      if errorlevel 1 exit /b 1
+                  '''
+              }
             }
         }
 
