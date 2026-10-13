@@ -82,18 +82,26 @@ pipeline {
         stage('Build and Push Images') {
             steps {
                 withCredentials([
-                  usernamePassword(
-                      credentialsId: 'docker-hub',
-                      usernameVariable: 'DOCKERHUB_USER',
-                      passwordVariable: 'DOCKERHUB_PASS'
-                  )
-              ]) {
-                  bat '''
-                      @echo off
-                      echo %DOCKERHUB_PASS% | docker login -u %DOCKERHUB_USER% --password-stdin
-                      if errorlevel 1 exit /b 1
-                  '''
-              }
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASS'
+                    )
+                ]) {
+                    powershell '''
+                        $token = $env:DOCKERHUB_PASS
+                        $bytes = [System.Text.Encoding]::UTF8.GetBytes($token)
+                        $sha = [System.Security.Cryptography.SHA256]::Create()
+                        $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "")
+                
+                        Write-Host "Username: $env:DOCKERHUB_USER"
+                        Write-Host "Token length: $($token.Length)"
+                        Write-Host "Token SHA256: $hash"
+                
+                        $token = $null
+                        $env:DOCKERHUB_PASS = $null
+                    '''
+                }
             }
         }
 
