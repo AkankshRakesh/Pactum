@@ -271,10 +271,9 @@ pipeline {
       }
     }
 
+    
     stage('Install cluster add-ons') {
       steps {
-        echo 'Install AWS Load Balancer Controller using the official AWS EKS instructions and an IAM service-account role before applying ALB Ingress.'
-
         withCredentials([
           usernamePassword(
             credentialsId: 'aws-creds',
@@ -284,6 +283,10 @@ pipeline {
         ]) {
           powershell '''
             $ErrorActionPreference = 'Stop'
+
+            if (-not (Test-Path '.\\scripts\\helm-docker.ps1')) {
+              throw 'scripts/helm-docker.ps1 not found'
+            }
 
             $account = aws sts get-caller-identity --query Account --output text
             if ($LASTEXITCODE -ne 0) {
@@ -309,8 +312,6 @@ pipeline {
                 if ($LASTEXITCODE -ne 0) {
                   throw 'Could not create ALB controller IAM policy'
                 }
-              } else {
-                Write-Host 'ALB controller policy already exists; review policy updates separately.'
               }
 
               eksctl utils associate-iam-oidc-provider `
@@ -335,17 +336,17 @@ pipeline {
                 throw 'Could not create ALB controller service account'
               }
 
-              .\scripts\helm-docker.ps1 repo add eks https://aws.github.io/eks-charts
+              & '.\\scripts\\helm-docker.ps1' repo add eks https://aws.github.io/eks-charts
               if ($LASTEXITCODE -ne 0) {
                 throw 'Could not add EKS Helm repository'
               }
 
-              .\scripts\helm-docker.ps1 repo update
+              & '.\\scripts\\helm-docker.ps1' repo update
               if ($LASTEXITCODE -ne 0) {
                 throw 'Helm repo update failed'
               }
 
-              .\scripts\helm-docker.ps1 upgrade --install aws-load-balancer-controller `
+              & '.\\scripts\\helm-docker.ps1' upgrade --install aws-load-balancer-controller `
                 eks/aws-load-balancer-controller `
                 --namespace kube-system `
                 --set "clusterName=$env:CLUSTER_NAME" `
@@ -365,13 +366,15 @@ pipeline {
               if ($LASTEXITCODE -ne 0) {
                 throw 'ALB controller is not ready'
               }
-            } finally {
+            }
+            finally {
               Remove-Item $policyFile -Force -ErrorAction SilentlyContinue
             }
           '''
         }
       }
     }
+
 
     stage('Deploy Kubernetes resources') {
       steps {
