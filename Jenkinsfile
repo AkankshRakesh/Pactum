@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -9,29 +8,22 @@ pipeline {
         timeout(time: 90, unit: 'MINUTES')
     }
 
-    parameters {
-        string(name: 'AWS_REGION', defaultValue: 'ap-south-1', description: 'AWS region')
-        string(name: 'STACK_NAME', defaultValue: 'pactum', description: 'CloudFormation stack')
-        string(name: 'CLUSTER_NAME', defaultValue: 'pactum-eks', description: 'EKS cluster')
-        string(name: 'KUBERNETES_VERSION', defaultValue: '1.33', description: 'EKS version')
-        string(name: 'S3_BUCKET_NAME', defaultValue: '', description: 'S3 bucket name')
-        string(name: 'EKS_PUBLIC_ACCESS_CIDRS', defaultValue: '', description: 'Allowed API CIDRs')
-        string(name: 'ACM_CERTIFICATE_ARN', defaultValue: '', description: 'Optional certificate ARN')
-        string(name: 'DB_NAME', defaultValue: 'pactum', description: 'Database name')
-        string(name: 'DB_USERNAME', defaultValue: 'pactumadmin', description: 'Database username')
-        string(name: 'DB_INSTANCE_CLASS', defaultValue: 'db.t3.micro', description: 'RDS instance class')
-        string(name: 'NODE_INSTANCE_TYPES', defaultValue: 't3.medium', description: 'EKS node type')
-        string(name: 'DESIRED_NODES', defaultValue: '2', description: 'Desired node count')
-        string(name: 'MAX_NODES', defaultValue: '3', description: 'Maximum node count')
-        string(name: 'BACKEND_IMAGE', defaultValue: '', description: 'Docker Hub username/pactum-backend')
-        string(name: 'FRONTEND_IMAGE', defaultValue: '', description: 'Docker Hub username/pactum-frontend')
-        string(name: 'DJANGO_ALLOWED_HOSTS', defaultValue: '*', description: 'Django allowed hosts')
-        string(name: 'CSRF_TRUSTED_ORIGINS', defaultValue: '', description: 'Comma-separated trusted origins')
-        string(name: 'NEXT_PUBLIC_API_BASE_URL', defaultValue: '/api', description: 'Frontend API URL')
-    }
-
     environment {
-        AWS_DEFAULT_REGION = "${params.AWS_REGION}"
+        // Hard-coded deployment defaults. Change these here, not in the Jenkins UI.
+        AWS_REGION = 'ap-south-1'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        STACK_NAME = 'pactum'
+        CLUSTER_NAME = 'pactum-eks'
+        KUBERNETES_VERSION = '1.33'
+        DB_NAME = 'pactum'
+        DB_USERNAME = 'pactumadmin'
+        DB_INSTANCE_CLASS = 'db.t3.micro'
+        NODE_INSTANCE_TYPES = 't3.medium'
+        DESIRED_NODES = '2'
+        MAX_NODES = '3'
+        DJANGO_ALLOWED_HOSTS = '*'
+        CSRF_TRUSTED_ORIGINS = ''
+        NEXT_PUBLIC_API_BASE_URL = '/api'
         K8S_NAMESPACE = 'pactum'
     }
 
@@ -45,6 +37,11 @@ pipeline {
                         returnStdout: true,
                         script: 'git rev-parse --short=12 HEAD'
                     ).trim()
+
+                    if (!env.IMAGE_TAG) {
+                        error('Could not determine the Git commit SHA.')
+                    }
+
                     echo "Image tag: ${env.IMAGE_TAG}"
                 }
 
@@ -59,7 +56,9 @@ pipeline {
 
                     foreach ($path in @(
                         'backend/manage.py',
+                        'backend/Dockerfile',
                         'frontend/package.json',
+                        'frontend/Dockerfile',
                         'infra/cloudformation/pactum.yaml',
                         'deploy/kubernetes/backend-deployment.yaml',
                         'deploy/kubernetes/backend-service.yaml',
@@ -72,22 +71,9 @@ pipeline {
                         }
                     }
 
-                    foreach ($name in @(
-                        'S3_BUCKET_NAME',
-                        'EKS_PUBLIC_ACCESS_CIDRS',
-                        'BACKEND_IMAGE',
-                        'FRONTEND_IMAGE'
-                    )) {
-                        if ([string]::IsNullOrWhiteSpace(
-                            [Environment]::GetEnvironmentVariable($name)
-                        )) {
-                            throw "Set Jenkins parameter $name"
-                        }
-                    }
-
                     docker info
                     if ($LASTEXITCODE -ne 0) {
-                        throw 'Docker is unavailable'
+                        throw 'Docker is unavailable. Ensure Docker Desktop is running in Linux-container mode.'
                     }
                 '''
             }
@@ -105,38 +91,35 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
-                        $backendTag = "$env:BACKEND_IMAGE`:$env:IMAGE_TAG"
-                        $frontendTag = "$env:FRONTEND_IMAGE`:$env:IMAGE_TAG"
+                        $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        $frontendTag = '{0}/pactum-frontend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
 
-                        $env:DOCKERHUB_PASS |
-                            docker login -u $env:DOCKERHUB_USER --password-stdin
-
+                        $env:DOCKERHUB_PASS | docker login -u $env:DOCKERHUB_USER --password-stdin
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Docker Hub login failed'
+                            throw 'Docker Hub login failed.'
                         }
 
                         try {
                             docker build --target runtime -t $backendTag backend
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image build failed'
+                                throw 'Backend image build failed. Verify backend/Dockerfile has a runtime target.'
                             }
 
                             docker build -t $frontendTag `
                                 --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" `
                                 frontend
-
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image build failed'
+                                throw 'Frontend image build failed.'
                             }
 
                             docker push $backendTag
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image push failed'
+                                throw 'Backend image push failed.'
                             }
 
                             docker push $frontendTag
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image push failed'
+                                throw 'Frontend image push failed.'
                             }
                         }
                         finally {
@@ -147,7 +130,7 @@ pipeline {
             }
         }
 
-        stage('Provision AWS Infrastructure') {
+        stage('Provision AWS with CloudFormation') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -161,21 +144,46 @@ pipeline {
 
                         aws sts get-caller-identity
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'AWS credentials are invalid'
+                            throw 'AWS credentials are invalid or missing.'
                         }
+
+                        $accountId = (aws sts get-caller-identity --query Account --output text).Trim()
+                        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($accountId)) {
+                            throw 'Could not determine the AWS account ID.'
+                        }
+
+                        # Deterministic, account-specific name; no manual S3 bucket input required.
+                        $bucketName = "pactum-contracts-$accountId-$($env:AWS_REGION)"
+
+                        # Restrict the EKS public API to the Jenkins host's current public egress IP.
+                        # This avoids opening the Kubernetes API to 0.0.0.0/0.
+                        try {
+                            $publicIp = (Invoke-RestMethod -Uri 'https://checkip.amazonaws.com' -TimeoutSec 15).Trim()
+                            $parsedIp = $null
+                            if (-not [System.Net.IPAddress]::TryParse($publicIp, [ref]$parsedIp)) {
+                                throw "Invalid public IP returned: $publicIp"
+                            }
+                            $apiCidr = "$publicIp/32"
+                        }
+                        catch {
+                            throw "Could not determine Jenkins public IP. CloudFormation was not started. Details: $($_.Exception.Message)"
+                        }
+
+                        Write-Host "AWS account: $accountId"
+                        Write-Host "S3 bucket: $bucketName"
+                        Write-Host "EKS API allowlist: $apiCidr"
 
                         $overrides = @(
                             "ClusterName=$env:CLUSTER_NAME",
                             "KubernetesVersion=$env:KUBERNETES_VERSION",
-                            "EksPublicAccessCidrs=$env:EKS_PUBLIC_ACCESS_CIDRS",
+                            "EksPublicAccessCidrs=$apiCidr",
                             "DbName=$env:DB_NAME",
                             "DbUsername=$env:DB_USERNAME",
                             "DbInstanceClass=$env:DB_INSTANCE_CLASS",
                             "NodeInstanceTypes=$env:NODE_INSTANCE_TYPES",
                             "DesiredNodes=$env:DESIRED_NODES",
                             "MaxNodes=$env:MAX_NODES",
-                            "ContractsBucketName=$env:S3_BUCKET_NAME",
-                            "AcmCertificateArn=$env:ACM_CERTIFICATE_ARN"
+                            "ContractsBucketName=$bucketName",
                         )
 
                         aws cloudformation deploy `
@@ -187,20 +195,19 @@ pipeline {
                             --no-fail-on-empty-changeset
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'CloudFormation deployment failed'
+                            throw 'CloudFormation deployment failed. Check the stack Events in AWS CloudFormation.'
                         }
 
                         aws eks update-kubeconfig `
                             --region $env:AWS_REGION `
                             --name $env:CLUSTER_NAME
-
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not configure EKS access'
+                            throw 'Could not configure kubectl for the EKS cluster.'
                         }
 
                         kubectl get nodes
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Cannot access EKS cluster'
+                            throw 'kubectl cannot access the EKS cluster. Check EKS access permissions and the Jenkins public IP allowlist.'
                         }
                     '''
                 }
@@ -215,6 +222,11 @@ pipeline {
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ),
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASS'
+                    ),
                     string(
                         credentialsId: 'pactum-django-secret-key',
                         variable: 'DJANGO_SECRET_KEY'
@@ -223,40 +235,54 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
-                        $outputs = aws cloudformation describe-stacks `
+                        # Read actual resource values from the deployed CloudFormation stack.
+                        $outputsJson = aws cloudformation describe-stacks `
                             --region $env:AWS_REGION `
                             --stack-name $env:STACK_NAME `
                             --query 'Stacks[0].Outputs' `
-                            --output json | ConvertFrom-Json
+                            --output json
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not read CloudFormation outputs'
+                            throw 'Could not read CloudFormation outputs.'
                         }
 
+                        $outputs = $outputsJson | ConvertFrom-Json
                         $out = @{}
                         foreach ($item in $outputs) {
                             $out[$item.OutputKey] = $item.OutputValue
                         }
 
-                        if (-not $out['DbSecretArn']) {
-                            throw 'CloudFormation output DbSecretArn is missing'
+                        foreach ($requiredOutput in @(
+                            'ClusterName', 'DbSecretArn', 'DbName',
+                            'DbEndpoint', 'DbPort', 'ContractsBucketName'
+                        )) {
+                            if ([string]::IsNullOrWhiteSpace($out[$requiredOutput])) {
+                                throw "Required CloudFormation output is missing: $requiredOutput"
+                            }
                         }
 
-                        $db = aws secretsmanager get-secret-value `
+                        aws eks update-kubeconfig `
+                            --region $env:AWS_REGION `
+                            --name $out['ClusterName']
+                        if ($LASTEXITCODE -ne 0) {
+                            throw 'Could not configure kubectl for the CloudFormation EKS cluster.'
+                        }
+
+                        $dbJson = aws secretsmanager get-secret-value `
                             --region $env:AWS_REGION `
                             --secret-id $out['DbSecretArn'] `
                             --query SecretString `
-                            --output text | ConvertFrom-Json
+                            --output text
 
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not retrieve database credentials'
+                            throw 'Could not retrieve database credentials from Secrets Manager.'
                         }
+                        $db = $dbJson | ConvertFrom-Json
 
-                        kubectl create namespace $env:K8S_NAMESPACE `
-                            --dry-run=client -o yaml | kubectl apply -f -
-
+                        kubectl create namespace $env:K8S_NAMESPACE --dry-run=client -o yaml |
+                            kubectl apply -f -
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Namespace creation failed'
+                            throw 'Namespace creation failed.'
                         }
 
                         $secretArgs = @(
@@ -277,17 +303,18 @@ pipeline {
 
                         $secretYaml = & kubectl @secretArgs
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not generate application Secret'
+                            throw 'Could not generate the Kubernetes application Secret.'
                         }
 
                         $secretYaml | kubectl apply -f -
                         if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not apply application Secret'
+                            throw 'Could not apply the Kubernetes application Secret.'
                         }
 
-                        $temp = Join-Path $env:TEMP (
-                            'pactum-' + [guid]::NewGuid().ToString('N')
-                        )
+                        $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        $frontendTag = '{0}/pactum-frontend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+
+                        $temp = Join-Path $env:TEMP ('pactum-' + [guid]::NewGuid().ToString('N'))
                         New-Item -ItemType Directory -Path $temp | Out-Null
 
                         try {
@@ -301,56 +328,35 @@ pipeline {
 
                             foreach ($file in $files) {
                                 $source = Join-Path 'deploy/kubernetes' $file
-
                                 if (-not (Test-Path $source)) {
-                                    throw "Missing manifest: $source"
+                                    throw "Missing Kubernetes manifest: $source"
                                 }
 
                                 $content = Get-Content $source -Raw
-                                $content = $content.Replace(
-                                    'BACKEND_IMAGE_PLACEHOLDER',
-                                    "$env:BACKEND_IMAGE`:$env:IMAGE_TAG"
-                                )
-                                $content = $content.Replace(
-                                    'FRONTEND_IMAGE_PLACEHOLDER',
-                                    "$env:FRONTEND_IMAGE`:$env:IMAGE_TAG"
-                                )
-                                $content = $content.Replace(
-                                    'AWS_REGION_PLACEHOLDER',
-                                    $env:AWS_REGION
-                                )
-                                $content = $content.Replace(
-                                    'S3_BUCKET_PLACEHOLDER',
-                                    $out['ContractsBucketName']
-                                )
+                                $content = $content.Replace('BACKEND_IMAGE_PLACEHOLDER', $backendTag)
+                                $content = $content.Replace('FRONTEND_IMAGE_PLACEHOLDER', $frontendTag)
+                                $content = $content.Replace('AWS_REGION_PLACEHOLDER', $env:AWS_REGION)
+                                $content = $content.Replace('S3_BUCKET_PLACEHOLDER', $out['ContractsBucketName'])
 
-                                Set-Content `
-                                    -Path (Join-Path $temp $file) `
-                                    -Value $content `
-                                    -Encoding utf8
+                                Set-Content -Path (Join-Path $temp $file) -Value $content -Encoding utf8
                             }
 
-                            kubectl delete job pactum-migrate `
-                                -n $env:K8S_NAMESPACE --ignore-not-found
-
+                            # Run database migrations before rolling out the new application version.
+                            kubectl delete job pactum-migrate -n $env:K8S_NAMESPACE --ignore-not-found
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Could not remove previous migration Job'
+                                throw 'Could not remove the previous migration Job.'
                             }
 
                             kubectl apply -f (Join-Path $temp 'django-migration-job.yaml')
                             if ($LASTEXITCODE -ne 0) {
-                                throw 'Migration Job creation failed'
+                                throw 'Could not create the migration Job.'
                             }
 
-                            kubectl wait `
-                                --for=condition=complete `
-                                job/pactum-migrate `
-                                -n $env:K8S_NAMESPACE `
-                                --timeout=10m
-
+                            kubectl wait --for=condition=complete job/pactum-migrate `
+                                -n $env:K8S_NAMESPACE --timeout=10m
                             if ($LASTEXITCODE -ne 0) {
                                 kubectl logs job/pactum-migrate -n $env:K8S_NAMESPACE
-                                throw 'Database migration failed'
+                                throw 'Database migration failed.'
                             }
 
                             foreach ($file in @(
@@ -365,32 +371,43 @@ pipeline {
                                 }
                             }
 
+                            # Apply autoscaling manifests only if they exist in the repository.
+                            foreach ($file in @('backend-hpa.yaml', 'frontend-hpa.yaml')) {
+                                $source = Join-Path 'deploy/kubernetes' $file
+                                if (Test-Path $source) {
+                                    $content = Get-Content $source -Raw
+                                    $content = $content.Replace('BACKEND_IMAGE_PLACEHOLDER', $backendTag)
+                                    $content = $content.Replace('FRONTEND_IMAGE_PLACEHOLDER', $frontendTag)
+                                    Set-Content -Path (Join-Path $temp $file) -Value $content -Encoding utf8
+                                    kubectl apply -f (Join-Path $temp $file)
+                                    if ($LASTEXITCODE -ne 0) {
+                                        throw "Failed to apply $file"
+                                    }
+                                }
+                            }
+
                             kubectl rollout status deployment/pactum-backend `
                                 -n $env:K8S_NAMESPACE --timeout=5m
-
                             if ($LASTEXITCODE -ne 0) {
                                 kubectl get pods -n $env:K8S_NAMESPACE
-                                kubectl logs deployment/pactum-backend `
-                                    -n $env:K8S_NAMESPACE --tail=100
-                                throw 'Backend rollout failed'
+                                kubectl logs deployment/pactum-backend -n $env:K8S_NAMESPACE --tail=100
+                                throw 'Backend rollout failed.'
                             }
 
                             kubectl rollout status deployment/pactum-frontend `
                                 -n $env:K8S_NAMESPACE --timeout=5m
-
                             if ($LASTEXITCODE -ne 0) {
                                 kubectl get pods -n $env:K8S_NAMESPACE
-                                kubectl logs deployment/pactum-frontend `
-                                    -n $env:K8S_NAMESPACE --tail=100
-                                throw 'Frontend rollout failed'
+                                kubectl logs deployment/pactum-frontend -n $env:K8S_NAMESPACE --tail=100
+                                throw 'Frontend rollout failed.'
                             }
 
-                            kubectl get deployments,pods,services `
-                                -n $env:K8S_NAMESPACE
+                            kubectl get deployments,pods,services,hpa -n $env:K8S_NAMESPACE
+                            Write-Host "Database endpoint: $($out['DbEndpoint'])"
+                            Write-Host "Contracts bucket: $($out['ContractsBucketName'])"
                         }
                         finally {
-                            Remove-Item $temp -Recurse -Force `
-                                -ErrorAction SilentlyContinue
+                            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
                         }
                     '''
                 }
@@ -404,7 +421,7 @@ pipeline {
         }
 
         failure {
-            echo 'Pipeline failed. Check the failed stage in the console log.'
+            echo 'Pipeline failed. Inspect the failed stage and CloudFormation stack Events.'
 
             withCredentials([
                 usernamePassword(
@@ -416,23 +433,16 @@ pipeline {
                 powershell '''
                     $ErrorActionPreference = 'Continue'
 
-                    aws eks describe-cluster `
-                        --region $env:AWS_REGION `
-                        --name $env:CLUSTER_NAME *> $null
-
+                    aws eks describe-cluster --region $env:AWS_REGION --name $env:CLUSTER_NAME *> $null
                     if ($LASTEXITCODE -eq 0) {
-                        aws eks update-kubeconfig `
-                            --region $env:AWS_REGION `
-                            --name $env:CLUSTER_NAME
-
+                        aws eks update-kubeconfig --region $env:AWS_REGION --name $env:CLUSTER_NAME
                         if ($LASTEXITCODE -eq 0) {
                             kubectl get pods -n $env:K8S_NAMESPACE
-                            kubectl get events -n $env:K8S_NAMESPACE `
-                                --sort-by=.metadata.creationTimestamp
+                            kubectl get events -n $env:K8S_NAMESPACE --sort-by=.metadata.creationTimestamp
                         }
                     }
                     else {
-                        Write-Host 'EKS cluster is not available; skipping diagnostics.'
+                        Write-Host 'EKS cluster is not available; skipping Kubernetes diagnostics.'
                     }
                 '''
             }
@@ -441,6 +451,9 @@ pipeline {
         always {
             powershell '''
                 docker image prune -f
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host 'Docker cleanup failed; continuing.'
+                }
             '''
         }
     }
