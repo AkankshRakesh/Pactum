@@ -1,3 +1,4 @@
+
 pipeline {
   agent any
 
@@ -13,8 +14,8 @@ pipeline {
     string(name: 'STACK_NAME', defaultValue: 'pactum', description: 'CloudFormation stack')
     string(name: 'CLUSTER_NAME', defaultValue: 'pactum-eks', description: 'EKS cluster')
     string(name: 'KUBERNETES_VERSION', defaultValue: '1.33', description: 'Supported EKS version')
-    string(name: 'S3_BUCKET_NAME', defaultValue: '', description: 'Globally unique private S3 bucket')
-    string(name: 'EKS_PUBLIC_ACCESS_CIDRS', defaultValue: '', description: 'Restricted CIDR allowlist for EKS API')
+    string(name: 'S3_BUCKET_NAME', defaultValue: '', description: 'Globally unique S3 bucket name')
+    string(name: 'EKS_PUBLIC_ACCESS_CIDRS', defaultValue: '', description: 'Restricted EKS API CIDR allowlist')
     string(name: 'ACM_CERTIFICATE_ARN', defaultValue: '', description: 'Optional ACM certificate ARN')
     string(name: 'DB_NAME', defaultValue: 'pactum', description: 'RDS database name')
     string(name: 'DB_USERNAME', defaultValue: 'pactumadmin', description: 'RDS username')
@@ -24,10 +25,9 @@ pipeline {
     string(name: 'MAX_NODES', defaultValue: '3', description: 'Maximum EKS nodes')
     string(name: 'BACKEND_IMAGE', defaultValue: '', description: 'Docker Hub image, e.g. username/pactum-backend')
     string(name: 'FRONTEND_IMAGE', defaultValue: '', description: 'Docker Hub image, e.g. username/pactum-frontend')
-    string(name: 'DJANGO_ALLOWED_HOSTS', defaultValue: '*', description: 'Replace with exact production hosts')
+    string(name: 'DJANGO_ALLOWED_HOSTS', defaultValue: '*', description: 'Production Django allowed hosts')
     string(name: 'CSRF_TRUSTED_ORIGINS', defaultValue: '', description: 'Comma-separated trusted origins')
-    string(name: 'NEXT_PUBLIC_API_BASE_URL', defaultValue: '/api', description: 'Browser-reachable API URL')
-    booleanParam(name: 'DEPLOY_MONITORING', defaultValue: false, description: 'Install Prometheus/Grafana')
+    string(name: 'NEXT_PUBLIC_API_BASE_URL', defaultValue: '/api', description: 'Frontend API base URL')
   }
 
   environment {
@@ -40,48 +40,10 @@ pipeline {
       steps {
         checkout scm
 
-        powershell '''
-          $ErrorActionPreference = 'Stop'
-
-          foreach ($tool in @('aws','kubectl','docker','eksctl','trivy','npm')) {
-            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-              throw "Missing required tool: $tool"
-            }
-          }
-
-          foreach ($path in @(
-            'backend/manage.py',
-            'frontend/package.json',
-            'infra/cloudformation/pactum.yaml'
-          )) {
-            if (-not (Test-Path $path)) {
-              throw "Missing required file: $path"
-            }
-          }
-
-          foreach ($name in @(
-            'S3_BUCKET_NAME',
-            'EKS_PUBLIC_ACCESS_CIDRS',
-            'BACKEND_IMAGE',
-            'FRONTEND_IMAGE'
-          )) {
-            if ([string]::IsNullOrWhiteSpace(
-              [Environment]::GetEnvironmentVariable($name)
-            )) {
-              throw "Set Jenkins parameter $name"
-            }
-          }
-
-          aws sts get-caller-identity
-          if ($LASTEXITCODE -ne 0) {
-            throw 'AWS credentials are not available'
-          }
-        '''
-
         script {
           env.IMAGE_TAG = powershell(
             returnStdout: true,
-            script: '(git rev-parse --short=12 HEAD)'
+            script: 'git rev-parse --short=12 HEAD'
           ).trim()
 
           if (!env.IMAGE_TAG) {
@@ -90,20 +52,41 @@ pipeline {
 
           echo "Image tag: ${env.IMAGE_TAG}"
         }
-      }
-    }
 
-    stage('Build Helm Docker image') {
-      steps {
         powershell '''
           $ErrorActionPreference = 'Stop'
 
-          docker build `
-            -t pactum-helm-aws:latest `
-            infra/jenkins-tools/helm-aws
+          foreach ($tool in @('aws', 'kubectl', 'docker', 'eksctl', 'trivy', 'npm')) {
+            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+              throw "Missing required tool: $tool"
+            }
+          }
 
+          foreach ($path in @(
+            'backend/manage.py',
+            'frontend/package.json',
+            'infra/cloudformation/pactum.yaml',
+            'deploy/kubernetes/backend-deployment.yaml',
+            'deploy/kubernetes/backend-service.yaml',
+            'deploy/kubernetes/frontend-deployment.yaml',
+            'deploy/kubernetes/frontend-service.yaml',
+            'deploy/kubernetes/django-migration-job.yaml',
+            'deploy/kubernetes/ingress.yaml'
+          )) {
+            if (-not (Test-Path $path)) {
+              throw "Missing required file: $path"
+            }
+          }
+
+          foreach ($name in @('S3_BUCKET_NAME', 'EKS_PUBLIC_ACCESS_CIDRS', 'BACKEND_IMAGE', 'FRONTEND_IMAGE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Set Jenkins parameter $name"
+            }
+          }
+
+          docker info
           if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to build Helm Docker image'
+            throw 'Docker is unavailable'
           }
         '''
       }
@@ -118,7 +101,7 @@ pipeline {
 
               docker build --target test -t "pactum-backend-test:$env:IMAGE_TAG" backend
               if ($LASTEXITCODE -ne 0) {
-                throw 'Backend test image build failed'
+                throw 'Backend test image build failed. Check the backend Dockerfile test target.'
               }
 
               docker run --rm "pactum-backend-test:$env:IMAGE_TAG"
@@ -168,24 +151,20 @@ pipeline {
           powershell '''
             $ErrorActionPreference = 'Stop'
 
-            $backendTag = "$env:BACKEND_IMAGE`:$env:IMAGE_TAG"
-            $frontendTag = "$env:FRONTEND_IMAGE`:$env:IMAGE_TAG"
+            $backendTag = "${env:BACKEND_IMAGE}:$env:IMAGE_TAG"
+            $frontendTag = "${env:FRONTEND_IMAGE}:$env:IMAGE_TAG"
 
-            $env:DOCKERHUB_PASS |
-              docker login -u $env:DOCKERHUB_USER --password-stdin
-
+            $env:DOCKERHUB_PASS | docker login -u $env:DOCKERHUB_USER --password-stdin
             if ($LASTEXITCODE -ne 0) {
               throw 'Docker Hub login failed'
             }
 
             docker build --target runtime -t $backendTag backend
             if ($LASTEXITCODE -ne 0) {
-              throw 'Backend image build failed'
+              throw 'Backend image build failed. Check the backend Dockerfile runtime target.'
             }
 
-            docker build -t $frontendTag `
-              --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" frontend
-
+            docker build -t $frontendTag --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" frontend
             if ($LASTEXITCODE -ne 0) {
               throw 'Frontend image build failed'
             }
@@ -228,6 +207,11 @@ pipeline {
           powershell '''
             $ErrorActionPreference = 'Stop'
 
+            aws sts get-caller-identity
+            if ($LASTEXITCODE -ne 0) {
+              throw 'AWS credentials are invalid'
+            }
+
             $overrides = @(
               "ClusterName=$env:CLUSTER_NAME",
               "KubernetesVersion=$env:KUBERNETES_VERSION",
@@ -242,22 +226,12 @@ pipeline {
               "AcmCertificateArn=$env:ACM_CERTIFICATE_ARN"
             )
 
-            aws cloudformation deploy `
-              --region $env:AWS_REGION `
-              --stack-name $env:STACK_NAME `
-              --template-file infra/cloudformation/pactum.yaml `
-              --capabilities CAPABILITY_NAMED_IAM `
-              --parameter-overrides $overrides `
-              --no-fail-on-empty-changeset
-
+            aws cloudformation deploy --region $env:AWS_REGION --stack-name $env:STACK_NAME --template-file infra/cloudformation/pactum.yaml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides $overrides --no-fail-on-empty-changeset
             if ($LASTEXITCODE -ne 0) {
-              throw 'CloudFormation deployment failed'
+              throw 'CloudFormation deployment failed. Verify the template parameter names.'
             }
 
-            aws eks update-kubeconfig `
-              --region $env:AWS_REGION `
-              --name $env:CLUSTER_NAME
-
+            aws eks update-kubeconfig --region $env:AWS_REGION --name $env:CLUSTER_NAME
             if ($LASTEXITCODE -ne 0) {
               throw 'EKS kubeconfig update failed'
             }
@@ -271,8 +245,7 @@ pipeline {
       }
     }
 
-    
-    stage('Install cluster add-ons') {
+    stage('Install AWS Load Balancer Controller') {
       steps {
         withCredentials([
           usernamePassword(
@@ -284,8 +257,19 @@ pipeline {
           powershell '''
             $ErrorActionPreference = 'Stop'
 
-            if (-not (Test-Path '.\\scripts\\helm-docker.ps1')) {
-              throw 'scripts/helm-docker.ps1 not found'
+            $outputs = aws cloudformation describe-stacks --region $env:AWS_REGION --stack-name $env:STACK_NAME --query 'Stacks[0].Outputs' --output json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Cannot read CloudFormation outputs'
+            }
+
+            $out = @{}
+            foreach ($item in $outputs) {
+              $out[$item.OutputKey] = $item.OutputValue
+            }
+
+            $vpcId = $out['VpcId']
+            if ([string]::IsNullOrWhiteSpace($vpcId)) {
+              throw 'CloudFormation output VpcId is missing. Add it to the template outputs.'
             }
 
             $account = aws sts get-caller-identity --query Account --output text
@@ -296,85 +280,55 @@ pipeline {
             $policyName = "AWSLoadBalancerControllerIAMPolicy-$env:CLUSTER_NAME"
             $policyArn = "arn:aws:iam::${account}:policy/${policyName}"
             $policyFile = Join-Path $env:TEMP 'aws-lbc-iam-policy.json'
+            $manifestFile = Join-Path $env:TEMP 'aws-lbc-full.yaml'
 
             try {
-              Invoke-WebRequest `
-                -Uri 'https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json' `
-                -OutFile $policyFile
+              Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json' -OutFile $policyFile
 
               aws iam get-policy --policy-arn $policyArn *> $null
-
               if ($LASTEXITCODE -ne 0) {
-                aws iam create-policy `
-                  --policy-name $policyName `
-                  --policy-document "file://$policyFile"
-
+                aws iam create-policy --policy-name $policyName --policy-document "file://$policyFile"
                 if ($LASTEXITCODE -ne 0) {
-                  throw 'Could not create ALB controller IAM policy'
+                  throw 'Could not create AWS Load Balancer Controller IAM policy'
                 }
               }
 
-              eksctl utils associate-iam-oidc-provider `
-                --region $env:AWS_REGION `
-                --cluster $env:CLUSTER_NAME `
-                --approve
-
+              eksctl utils associate-iam-oidc-provider --region $env:AWS_REGION --cluster $env:CLUSTER_NAME --approve
               if ($LASTEXITCODE -ne 0) {
                 throw 'Could not associate EKS OIDC provider'
               }
 
-              eksctl create iamserviceaccount `
-                --cluster $env:CLUSTER_NAME `
-                --region $env:AWS_REGION `
-                --namespace kube-system `
-                --name aws-load-balancer-controller `
-                --attach-policy-arn $policyArn `
-                --approve `
-                --override-existing-serviceaccounts
-
+              eksctl create iamserviceaccount --cluster $env:CLUSTER_NAME --region $env:AWS_REGION --namespace kube-system --name aws-load-balancer-controller --role-name pactum-aws-load-balancer-controller-role --attach-policy-arn $policyArn --approve --override-existing-serviceaccounts
               if ($LASTEXITCODE -ne 0) {
-                throw 'Could not create ALB controller service account'
+                throw 'Could not create the controller IAM service account'
               }
 
-              & '.\\scripts\\helm-docker.ps1' repo add eks https://aws.github.io/eks-charts
+              Invoke-WebRequest -Uri 'https://github.com/kubernetes-sigs/aws-load-balancer-controller/releases/download/v2.13.3/v2_13_3_full.yaml' -OutFile $manifestFile
+
+              $manifest = Get-Content $manifestFile -Raw
+              $manifest = $manifest.Replace('your-cluster-name', $env:CLUSTER_NAME)
+              $manifest = $manifest.Replace('region-code', $env:AWS_REGION)
+              $manifest = $manifest.Replace('vpc-xxxxxxxx', $vpcId)
+              Set-Content -Path $manifestFile -Value $manifest -Encoding utf8
+
+              kubectl apply -f $manifestFile
               if ($LASTEXITCODE -ne 0) {
-                throw 'Could not add EKS Helm repository'
+                throw 'Could not apply AWS Load Balancer Controller manifests'
               }
 
-              & '.\\scripts\\helm-docker.ps1' repo update
+              kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=5m
               if ($LASTEXITCODE -ne 0) {
-                throw 'Helm repo update failed'
-              }
-
-              & '.\\scripts\\helm-docker.ps1' upgrade --install aws-load-balancer-controller `
-                eks/aws-load-balancer-controller `
-                --namespace kube-system `
-                --set "clusterName=$env:CLUSTER_NAME" `
-                --set serviceAccount.create=false `
-                --set serviceAccount.name=aws-load-balancer-controller `
-                --wait `
-                --timeout 10m
-
-              if ($LASTEXITCODE -ne 0) {
-                throw 'ALB controller Helm install failed'
-              }
-
-              kubectl rollout status deployment/aws-load-balancer-controller `
-                -n kube-system `
-                --timeout=5m
-
-              if ($LASTEXITCODE -ne 0) {
-                throw 'ALB controller is not ready'
+                throw 'AWS Load Balancer Controller deployment is not ready'
               }
             }
             finally {
               Remove-Item $policyFile -Force -ErrorAction SilentlyContinue
+              Remove-Item $manifestFile -Force -ErrorAction SilentlyContinue
             }
           '''
         }
       }
     }
-
 
     stage('Deploy Kubernetes resources') {
       steps {
@@ -384,11 +338,6 @@ pipeline {
             usernameVariable: 'AWS_ACCESS_KEY_ID',
             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
           ),
-          usernamePassword(
-            credentialsId: 'docker-hub',
-            usernameVariable: 'DOCKERHUB_USER',
-            passwordVariable: 'DOCKERHUB_PASS'
-          ),
           string(
             credentialsId: 'pactum-django-secret-key',
             variable: 'DJANGO_SECRET_KEY'
@@ -396,14 +345,8 @@ pipeline {
         ]) {
           powershell '''
             $ErrorActionPreference = 'Stop'
-            $env:AWS_DEFAULT_REGION = $env:AWS_REGION
 
-            $outputs = aws cloudformation describe-stacks `
-              --region $env:AWS_REGION `
-              --stack-name $env:STACK_NAME `
-              --query 'Stacks[0].Outputs' `
-              --output json | ConvertFrom-Json
-
+            $outputs = aws cloudformation describe-stacks --region $env:AWS_REGION --stack-name $env:STACK_NAME --query 'Stacks[0].Outputs' --output json | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) {
               throw 'Cannot read CloudFormation outputs'
             }
@@ -413,30 +356,19 @@ pipeline {
               $out[$item.OutputKey] = $item.OutputValue
             }
 
-            $db = aws secretsmanager get-secret-value `
-              --region $env:AWS_REGION `
-              --secret-id $out['DbSecretArn'] `
-              --query SecretString `
-              --output text | ConvertFrom-Json
-
+            $db = aws secretsmanager get-secret-value --region $env:AWS_REGION --secret-id $out['DbSecretArn'] --query SecretString --output text | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) {
               throw 'Cannot retrieve RDS credentials'
             }
 
-            kubectl create namespace pactum --dry-run=client -o yaml |
-              kubectl apply -f -
-
+            kubectl create namespace pactum --dry-run=client -o yaml | kubectl apply -f -
             if ($LASTEXITCODE -ne 0) {
               throw 'Namespace setup failed'
             }
 
             $secretArgs = @(
-              'create',
-              'secret',
-              'generic',
-              'pactum-app-secrets',
-              '-n',
-              'pactum',
+              'create', 'secret', 'generic', 'pactum-app-secrets',
+              '-n', 'pactum',
               "--from-literal=DJANGO_SECRET_KEY=$env:DJANGO_SECRET_KEY",
               '--from-literal=DJANGO_DEBUG=False',
               "--from-literal=DJANGO_ALLOWED_HOSTS=$env:DJANGO_ALLOWED_HOSTS",
@@ -447,19 +379,17 @@ pipeline {
               "--from-literal=DB_HOST=$($out['DbEndpoint'])",
               "--from-literal=DB_PORT=$($out['DbPort'])",
               '--from-literal=DB_SSLMODE=require',
-              '--dry-run=client',
-              '-o',
-              'yaml'
+              '--dry-run=client', '-o', 'yaml'
             )
 
             $secretYaml = & kubectl @secretArgs
             if ($LASTEXITCODE -ne 0) {
-              throw 'Could not generate app Secret'
+              throw 'Could not generate application Secret'
             }
 
             $secretYaml | kubectl apply -f -
             if ($LASTEXITCODE -ne 0) {
-              throw 'Could not apply app Secret'
+              throw 'Could not apply application Secret'
             }
 
             $temp = Join-Path $env:TEMP ('pactum-' + [guid]::NewGuid().ToString('N'))
@@ -479,30 +409,18 @@ pipeline {
               )
 
               foreach ($file in $files) {
-                $content = Get-Content (Join-Path 'deploy/kubernetes' $file) -Raw
+                $source = Join-Path 'deploy/kubernetes' $file
+                if (-not (Test-Path $source)) {
+                  throw "Missing Kubernetes manifest: $source"
+                }
 
-                $content = $content.Replace(
-                  'BACKEND_IMAGE_PLACEHOLDER',
-                  "$env:BACKEND_IMAGE`:$env:IMAGE_TAG"
-                )
+                $content = Get-Content $source -Raw
+                $content = $content.Replace('BACKEND_IMAGE_PLACEHOLDER', "${env:BACKEND_IMAGE}:$env:IMAGE_TAG")
+                $content = $content.Replace('FRONTEND_IMAGE_PLACEHOLDER', "${env:FRONTEND_IMAGE}:$env:IMAGE_TAG")
+                $content = $content.Replace('AWS_REGION_PLACEHOLDER', $env:AWS_REGION)
+                $content = $content.Replace('S3_BUCKET_PLACEHOLDER', $out['ContractsBucketName'])
 
-                $content = $content.Replace(
-                  'FRONTEND_IMAGE_PLACEHOLDER',
-                  "$env:FRONTEND_IMAGE`:$env:IMAGE_TAG"
-                )
-
-                $content = $content.Replace(
-                  'AWS_REGION_PLACEHOLDER',
-                  $env:AWS_REGION
-                ).Replace(
-                  'S3_BUCKET_PLACEHOLDER',
-                  $out['ContractsBucketName']
-                )
-
-                Set-Content `
-                  -Path (Join-Path $temp $file) `
-                  -Value $content `
-                  -Encoding utf8
+                Set-Content -Path (Join-Path $temp $file) -Value $content -Encoding utf8
               }
 
               kubectl delete job pactum-migrate -n pactum --ignore-not-found
@@ -512,10 +430,7 @@ pipeline {
                 throw 'Migration Job creation failed'
               }
 
-              kubectl wait --for=condition=complete job/pactum-migrate `
-                -n pactum `
-                --timeout=10m
-
+              kubectl wait --for=condition=complete job/pactum-migrate -n pactum --timeout=10m
               if ($LASTEXITCODE -ne 0) {
                 kubectl logs job/pactum-migrate -n pactum
                 throw 'Django migrations failed'
@@ -531,83 +446,43 @@ pipeline {
                 'ingress.yaml'
               )) {
                 kubectl apply -f (Join-Path $temp $file)
-
                 if ($LASTEXITCODE -ne 0) {
                   throw "Apply failed: $file"
                 }
               }
 
-              kubectl rollout status deployment/pactum-backend `
-                -n pactum `
-                --timeout=5m
-
+              kubectl rollout status deployment/pactum-backend -n pactum --timeout=5m
               if ($LASTEXITCODE -ne 0) {
+                kubectl get pods -n pactum
+                kubectl logs deployment/pactum-backend -n pactum --tail=100
                 throw 'Backend rollout failed'
               }
 
-              kubectl rollout status deployment/pactum-frontend `
-                -n pactum `
-                --timeout=5m
-
+              kubectl rollout status deployment/pactum-frontend -n pactum --timeout=5m
               if ($LASTEXITCODE -ne 0) {
+                kubectl get pods -n pactum
+                kubectl logs deployment/pactum-frontend -n pactum --tail=100
                 throw 'Frontend rollout failed'
               }
 
               kubectl get ingress,deployments,pods,services,hpa -n pactum
-            } finally {
+            }
+            finally {
               Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
             }
           '''
         }
       }
     }
-
-    stage('Optional monitoring') {
-      when {
-        expression {
-          return params.DEPLOY_MONITORING
-        }
-      }
-
-      steps {
-        powershell '''
-          $ErrorActionPreference = 'Stop'
-
-          .\scripts\helm-docker.ps1 repo add prometheus-community `
-            https://prometheus-community.github.io/helm-charts
-
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Could not add Prometheus repo'
-          }
-
-          .\scripts\helm-docker.ps1 repo update
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Helm repo update failed'
-          }
-
-          .\scripts\helm-docker.ps1 upgrade --install kube-prometheus-stack `
-            prometheus-community/kube-prometheus-stack `
-            --namespace monitoring `
-            --create-namespace `
-            --values deploy/kubernetes/monitoring-values.yaml `
-            --wait `
-            --timeout 15m
-
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Monitoring install failed'
-          }
-        '''
-      }
-    }
   }
 
   post {
     success {
-      echo "Pactum deployment succeeded for ${env.IMAGE_TAG}"
+      echo "Pactum deployment succeeded for image tag ${env.IMAGE_TAG}"
     }
 
     failure {
-      echo 'Pipeline failed. The previous deployments have not necessarily been changed; inspect the failed stage before retrying.'
+      echo 'Pipeline failed. Inspect the failed stage before retrying. Database migrations may already have changed the schema.'
 
       withCredentials([
         usernamePassword(
@@ -619,13 +494,11 @@ pipeline {
         powershell '''
           $ErrorActionPreference = 'Continue'
 
-          aws eks update-kubeconfig `
-            --region $env:AWS_REGION `
-            --name $env:CLUSTER_NAME
+          aws eks update-kubeconfig --region $env:AWS_REGION --name $env:CLUSTER_NAME
 
           if ($LASTEXITCODE -eq 0) {
-            kubectl rollout undo deployment/pactum-backend -n pactum
-            kubectl rollout undo deployment/pactum-frontend -n pactum
+            kubectl get pods -n pactum
+            kubectl get events -n pactum --sort-by=.metadata.creationTimestamp
           }
 
           exit 0
@@ -636,9 +509,8 @@ pipeline {
     always {
       powershell '''
         docker image prune -f
-
         if ($LASTEXITCODE -ne 0) {
-          Write-Host 'Docker prune skipped or failed; ignoring cleanup error.'
+          Write-Host 'Docker cleanup failed; continuing.'
         }
       '''
     }
