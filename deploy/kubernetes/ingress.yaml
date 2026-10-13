@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pactum
+  namespace: pactum
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/listen-ports: 'LISTEN_PORTS_PLACEHOLDER'
+    alb.ingress.kubernetes.io/certificate-arn: 'CERTIFICATE_ARN_PLACEHOLDER'
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: {name: pactum-backend, port: {number: 8000}}
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service: {name: pactum-backend, port: {number: 8000}}
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: pactum-frontend, port: {number: 3000}}

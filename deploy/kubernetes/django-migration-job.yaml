@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pactum-migrate
+  namespace: pactum
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: BACKEND_IMAGE_PLACEHOLDER
+          command: ["python", "manage.py", "migrate", "--noinput"]
+          envFrom:
+            - secretRef: {name: pactum-app-secrets}
+          env:
+            - {name: AWS_REGION, value: AWS_REGION_PLACEHOLDER}
+            - {name: AWS_STORAGE_BUCKET_NAME, value: S3_BUCKET_PLACEHOLDER}

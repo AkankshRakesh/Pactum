@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pactum-backend
+  namespace: pactum
+spec:
+  type: ClusterIP
+  selector: {app: pactum-backend}
+  ports: [{name: http, port: 8000, targetPort: http}]
