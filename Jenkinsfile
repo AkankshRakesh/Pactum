@@ -89,6 +89,8 @@ pipeline {
                     )
                 ]) {
                     powershell '''
+                        Write-Host "User: [$env:DOCKERHUB_USER] len=$($env:DOCKERHUB_USER.Length)"
+                        Write-Host "Pass len=$($env:DOCKERHUB_PASS.Length) lastCharCode=$([int][char]$env:DOCKERHUB_PASS[-1])"
                         $ErrorActionPreference = 'Stop'
 
                         $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
@@ -183,7 +185,7 @@ pipeline {
                             "NodeInstanceTypes=$env:NODE_INSTANCE_TYPES",
                             "DesiredNodes=$env:DESIRED_NODES",
                             "MaxNodes=$env:MAX_NODES",
-                            "ContractsBucketName=$bucketName",
+                            "ContractsBucketName=$bucketName"
                         )
 
                         aws cloudformation deploy `
