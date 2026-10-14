@@ -92,12 +92,22 @@ pipeline {
                         $user = $env:DOCKERHUB_USER.Trim()
                         $pass = $env:DOCKERHUB_PASS.Trim()
 
-                        # Prevent PowerShell from prepending a BOM when piping to docker
-                        $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+                        whoami
 
-                        $pass | docker login -u $user --password-stdin
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'Docker Hub login failed.'
+                        # 1. Fingerprint of the password (safe to print; it's a hash, not the token)
+                        $sha = [System.Security.Cryptography.SHA256]::Create()
+                        $hash = ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($pass)) | ForEach-Object { $_.ToString('x2') }) -join ''
+                        Write-Host "Pass SHA256: $hash"
+
+                        # 2. Test the credential directly against Docker's auth server, bypassing the docker CLI and daemon
+                        $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${user}:${pass}"))
+                        try {
+                            $r = Invoke-WebRequest -UseBasicParsing -Headers @{ Authorization = "Basic $b64" } `
+                                -Uri "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${user}/pactum-backend:push,pull"
+                            Write-Host "Direct auth OK: HTTP $($r.StatusCode)"
+                        }
+                        catch {
+                            Write-Host "Direct auth FAILED: $($_.Exception.Message)"
                         }
                     '''
                 }
