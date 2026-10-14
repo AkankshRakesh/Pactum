@@ -89,19 +89,34 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        $user = $env:DOCKERHUB_USER.Trim()
-                        $pass = $env:DOCKERHUB_PASS.Trim()
+                        $backendImage = "$($env:DOCKERHUB_USER)/pactum-backend:$($env:IMAGE_TAG)"
+                        $frontendImage = "$($env:DOCKERHUB_USER)/pactum-frontend:$($env:IMAGE_TAG)"
 
-                        $tmp = Join-Path $env:TEMP ('dh-' + [guid]::NewGuid().ToString('N'))
-                        try {
-                            [IO.File]::WriteAllText($tmp, $pass, (New-Object Text.UTF8Encoding($false)))
-                            cmd /c "docker login -u $user --password-stdin < `"$tmp`" 2>&1"
-                            $loginExit = $LASTEXITCODE
+                        Write-Host "Building backend image: $backendImage"
+                        docker build -f backend/Dockerfile -t $backendImage backend
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Backend Docker build failed."
                         }
-                        finally {
-                            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+
+                        Write-Host "Building frontend image: $frontendImage"
+                        docker build -f frontend/Dockerfile -t $frontendImage frontend
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Frontend Docker build failed."
                         }
-                        if ($loginExit -ne 0) { throw 'Docker Hub login failed.' }
+
+                        Write-Host "Pushing backend image..."
+                        docker push $backendImage
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Backend Docker push failed."
+                        }
+
+                        Write-Host "Pushing frontend image..."
+                        docker push $frontendImage
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Frontend Docker push failed."
+                        }
+
+                        Write-Host "Both images built and pushed successfully."
                     '''
                 }
             }
