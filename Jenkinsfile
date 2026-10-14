@@ -89,43 +89,15 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        Write-Host "User: [$env:DOCKERHUB_USER] len=$($env:DOCKERHUB_USER.Length)"
-                        Write-Host "Pass len=$($env:DOCKERHUB_PASS.Length) lastCharCode=$([int][char]$env:DOCKERHUB_PASS[-1])"
-                        $ErrorActionPreference = 'Stop'
+                        $user = $env:DOCKERHUB_USER.Trim()
+                        $pass = $env:DOCKERHUB_PASS.Trim()
 
-                        $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
-                        $frontendTag = '{0}/pactum-frontend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        # Prevent PowerShell from prepending a BOM when piping to docker
+                        $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
-                        $env:DOCKERHUB_PASS | docker login -u $env:DOCKERHUB_USER --password-stdin
+                        $pass | docker login -u $user --password-stdin
                         if ($LASTEXITCODE -ne 0) {
                             throw 'Docker Hub login failed.'
-                        }
-
-                        try { 
-                            docker build --target runtime -t $backendTag backend
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image build failed. Verify backend/Dockerfile has a runtime target.'
-                            }
-
-                            docker build -t $frontendTag `
-                                --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" `
-                                frontend
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image build failed.'
-                            }
-
-                            docker push $backendTag
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Backend image push failed.'
-                            }
-
-                            docker push $frontendTag
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Frontend image push failed.'
-                            }
-                        }
-                        finally {
-                            docker logout
                         }
                     '''
                 }
