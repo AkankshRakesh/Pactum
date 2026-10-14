@@ -83,7 +83,7 @@ pipeline {
             steps {
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'docker-hub-pactum',
+                        credentialsId: 'docker-hub',
                         usernameVariable: 'DOCKERHUB_USER',
                         passwordVariable: 'DOCKERHUB_PASS'
                     )
@@ -99,7 +99,7 @@ pipeline {
                             throw 'Docker Hub login failed.'
                         }
 
-                        try {
+                        try { 
                             docker build --target runtime -t $backendTag backend
                             if ($LASTEXITCODE -ne 0) {
                                 throw 'Backend image build failed. Verify backend/Dockerfile has a runtime target.'
