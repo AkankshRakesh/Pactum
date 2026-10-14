@@ -83,23 +83,48 @@ pipeline {
             steps {
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'docker-hub',
+                        credentialsId: 'docker-hub-pactum',
                         usernameVariable: 'DOCKERHUB_USER',
                         passwordVariable: 'DOCKERHUB_PASS'
                     )
                 ]) {
                     powershell '''
-                        $token = $env:DOCKERHUB_PASS
-                        $bytes = [System.Text.Encoding]::UTF8.GetBytes($token)
-                        $sha = [System.Security.Cryptography.SHA256]::Create()
-                        $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "")
-                
-                        Write-Host "Username: $env:DOCKERHUB_USER"
-                        Write-Host "Token length: $($token.Length)"
-                        Write-Host "Token SHA256: $hash"
-                
-                        $token = $null
-                        $env:DOCKERHUB_PASS = $null
+                        $ErrorActionPreference = 'Stop'
+
+                        $backendTag = '{0}/pactum-backend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        $frontendTag = '{0}/pactum-frontend:{1}' -f $env:DOCKERHUB_USER, $env:IMAGE_TAG
+
+                        $env:DOCKERHUB_PASS | docker login -u $env:DOCKERHUB_USER --password-stdin
+                        if ($LASTEXITCODE -ne 0) {
+                            throw 'Docker Hub login failed.'
+                        }
+
+                        try {
+                            docker build --target runtime -t $backendTag backend
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Backend image build failed. Verify backend/Dockerfile has a runtime target.'
+                            }
+
+                            docker build -t $frontendTag `
+                                --build-arg "NEXT_PUBLIC_API_BASE_URL=$env:NEXT_PUBLIC_API_BASE_URL" `
+                                frontend
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Frontend image build failed.'
+                            }
+
+                            docker push $backendTag
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Backend image push failed.'
+                            }
+
+                            docker push $frontendTag
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Frontend image push failed.'
+                            }
+                        }
+                        finally {
+                            docker logout
+                        }
                     '''
                 }
             }
