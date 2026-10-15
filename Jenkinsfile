@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -325,7 +324,6 @@ pipeline {
             }
         }
 
-        
         stage('Deploy Django Backend') {
             steps {
                 withCredentials([
@@ -346,14 +344,19 @@ pipeline {
                     string(
                         credentialsId: 'pactum-django-secret-key',
                         variable: 'DJANGO_SECRET_KEY'
+                    ),
+                    string(
+                        credentialsId: 'github-pactum-token',
+                        variable: 'GITHUB_TOKEN'
                     )
                 ]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
                         if (-not $env:SUPABASE_DB_PASSWORD -or
-                            -not $env:DJANGO_SECRET_KEY) {
-                            throw 'Database password or Django secret key is empty.'
+                            -not $env:DJANGO_SECRET_KEY -or
+                            -not $env:GITHUB_TOKEN) {
+                            throw 'Database password, Django secret key, or GitHub token is empty.'
                         }
 
                         if (-not $env:PACTUM_INSTANCE_ID) {
@@ -372,14 +375,20 @@ pipeline {
                             )
                         )
 
+                        # Base64 is transport encoding, not encryption.
+                        # Never print the encoded token or remote script.
+                        $githubTokenB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:GITHUB_TOKEN.Trim()
+                            )
+                        )
+
                         $image = '{0}/pactum-backend:{1}' -f `
                             $env:DOCKERHUB_USER.Trim(), $env:IMAGE_TAG
 
                         $commit = $env:GIT_COMMIT_FULL
                         $repo = $env:GITHUB_REPO
 
-                        # Single-quoted here-string: Bash variables and
-                        # command substitutions are NOT evaluated by PowerShell.
                         $remoteScript = @'
 set -eu
 export DEBIAN_FRONTEND=noninteractive
@@ -391,13 +400,20 @@ sudo mkdir -p /opt/pactum-deploy
 sudo chown ubuntu:ubuntu /opt/pactum-deploy
 cd /opt/pactum-deploy
 
+GITHUB_TOKEN_B64='__GITHUB_TOKEN_B64__'
+GITHUB_TOKEN="$(printf '%s' "$GITHUB_TOKEN_B64" | base64 -d)"
+AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+export GIT_TERMINAL_PROMPT=0
+
+# Authenticate only for Git operations; do not persist the token in .git/config.
 if [ ! -d repo/.git ]; then
-    git clone '__REPO__' repo
+    git -c http.extraheader="$AUTH_HEADER" clone '__REPO__' repo
 fi
 
 cd repo
-git fetch origin
+git -c http.extraheader="$AUTH_HEADER" fetch origin
 git checkout '__COMMIT__'
+unset GITHUB_TOKEN GITHUB_TOKEN_B64 AUTH_HEADER
 
 IMAGE='__IMAGE__'
 DB_PASSWORD_B64='__DB_B64__'
@@ -457,7 +473,7 @@ sudo /usr/local/bin/k3s kubectl -n pactum get service
 echo "Remote deployment completed"
 '@
 
-                        # Insert only controlled values into the literal script.
+                        # Insert controlled values into the literal remote script.
                         $remoteScript = $remoteScript.Replace(
                             '__REPO__', $repo
                         ).Replace(
@@ -468,6 +484,8 @@ echo "Remote deployment completed"
                             '__DB_B64__', $dbB64
                         ).Replace(
                             '__DJANGO_B64__', $djangoB64
+                        ).Replace(
+                            '__GITHUB_TOKEN_B64__', $githubTokenB64
                         )
 
                         $inputObject = @{
@@ -486,8 +504,8 @@ echo "Remote deployment completed"
                         )
 
                         try {
-                            
-                            $json = $inputObject | ConvertTo-Json -Depth 8 -Compress
+                            $json = $inputObject |
+                                ConvertTo-Json -Depth 8 -Compress
 
                             [System.IO.File]::WriteAllText(
                                 $inputPath,
@@ -495,8 +513,6 @@ echo "Remote deployment completed"
                                 [System.Text.UTF8Encoding]::new($false)
                             )
 
-
-                            
                             $awsOutput = & aws ssm send-command `
                                 --region $env:AWS_REGION `
                                 --cli-input-json "file://$inputPath" `
@@ -506,7 +522,9 @@ echo "Remote deployment completed"
                             $awsExitCode = $LASTEXITCODE
 
                             if ($awsExitCode -ne 0) {
-                                $awsOutput | ForEach-Object { Write-Host "$_" }
+                                $awsOutput | ForEach-Object {
+                                    Write-Host "$_"
+                                }
                                 throw "AWS SSM send-command failed with exit code $awsExitCode"
                             }
 
@@ -523,7 +541,6 @@ echo "Remote deployment completed"
                                 -ErrorAction SilentlyContinue
                         }
 
-                        $commandId = "$commandId".Trim()
                         $finished = $false
 
                         for ($i = 0; $i -lt 180; $i++) {
