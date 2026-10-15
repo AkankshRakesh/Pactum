@@ -244,7 +244,7 @@ pipeline {
                         }
 
                         $commands = @(
-                            'sudo /usr/local/bin/kubectl get nodes',
+                            'sudo /usr/local/bin/k3s kubectl get nodes',
                             'sudo systemctl is-active k3s'
                         )
 
@@ -486,36 +486,37 @@ echo "Remote deployment completed"
                         )
 
                         try {
-                            $inputObject |
-                                ConvertTo-Json -Depth 8 |
-                                Set-Content -Path $inputPath -Encoding utf8
+                            
+                            $json = $inputObject | ConvertTo-Json -Depth 8 -Compress
+
+                            [System.IO.File]::WriteAllText(
+                                $inputPath,
+                                $json,
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
 
                             
-                                $awsOutput = @(
-                                    & aws ssm send-command `
-                                        --region $env:AWS_REGION `
-                                        --cli-input-json "file://$inputPath" `
-                                        --query 'Command.CommandId' `
-                                        --output text 2>&1
-                                )
+                            $awsOutput = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$inputPath" `
+                                --query 'Command.CommandId' `
+                                --output text 2>&1
 
-                                $awsExitCode = $LASTEXITCODE
-                                $awsText = ($awsOutput | ForEach-Object { "$_" }) -join "`n"
+                            $awsExitCode = $LASTEXITCODE
 
-                                if ($awsExitCode -ne 0) {
-                                    throw "SSM send-command failed (exit $awsExitCode): $awsText"
-                                }
-
-                                $commandId = $awsText.Trim()
-
-                                if (-not $commandId -or $commandId -eq 'None') {
-                                    throw "AWS CLI returned no SSM command ID. Output: $awsText"
-                                }
-
-
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "SSM deployment submission failed: $commandId"
+                            if ($awsExitCode -ne 0) {
+                                $awsOutput | ForEach-Object { Write-Host "$_" }
+                                throw "AWS SSM send-command failed with exit code $awsExitCode"
                             }
+
+                            $commandId = "$awsOutput".Trim()
+
+                            if (-not $commandId -or $commandId -eq 'None') {
+                                throw "AWS SSM returned no command ID. Output: $awsOutput"
+                            }
+
+                            Write-Host "SSM command submitted: $commandId"
                         }
                         finally {
                             Remove-Item $inputPath -Force `
