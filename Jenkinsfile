@@ -448,13 +448,13 @@ sudo /usr/local/bin/k3s kubectl apply -n pactum \
 
 echo "Running database migrations"
 sudo /usr/local/bin/k3s kubectl -n pactum delete job \
-    pactum-django-migration --ignore-not-found=true
+    pactum-migrate --ignore-not-found=true
 
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/django-migration-job.yaml
 
 sudo /usr/local/bin/k3s kubectl -n pactum wait \
-    --for=condition=complete job/pactum-django-migration \
+    --for=condition=complete job/pactum-migrate \
     --timeout=300s
 
 echo "Deploying backend"
