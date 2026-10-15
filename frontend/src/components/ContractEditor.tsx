@@ -8,7 +8,7 @@ import ContractLoader from "../app/ContractLoader";
 import { useConfirm } from "./ConfirmDialog";
 import { buildTemplateBody, getTemplate } from "./contractTemplates";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 type User = { id: number; username: string; email: string };
 type ContractComment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; body: string; createdAt: string; status?: CommentStatus };
