@@ -365,54 +365,54 @@ pipeline {
                         $repo = $env:GITHUB_REPO
 
                         $remoteScript = @"
-                        set -eu
-                        export DEBIAN_FRONTEND=noninteractive
+set -eu
+export DEBIAN_FRONTEND=noninteractive
 
-                        sudo apt-get update
-                        sudo apt-get install -y git
-                        sudo mkdir -p /opt/pactum-deploy
-                        sudo chown ubuntu:ubuntu /opt/pactum-deploy
-                        cd /opt/pactum-deploy
+sudo apt-get update
+sudo apt-get install -y git
+sudo mkdir -p /opt/pactum-deploy
+sudo chown ubuntu:ubuntu /opt/pactum-deploy
+cd /opt/pactum-deploy
 
-                        if [ ! -d repo/.git ]; then
-                        git clone '$repo' repo
-                        fi
+if [ ! -d repo/.git ]; then
+  git clone '$repo' repo
+fi
 
-                        cd repo
-                        git fetch origin
-                        git checkout '$commit'
+cd repo
+git fetch origin
+git checkout '$commit'
 
-                        IMAGE='$image'
-                        DB_PASSWORD_B64='$dbB64'
-                        DJANGO_SECRET_KEY_B64='$djangoB64'
+IMAGE='$image'
+DB_PASSWORD_B64='$dbB64'
+DJANGO_SECRET_KEY_B64='$djangoB64'
 
-                        DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
-                        DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
+DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
+DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
 
-                        sudo /usr/local/bin/kubectl create namespace pactum --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+sudo /usr/local/bin/kubectl create namespace pactum --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
 
-                        sudo /usr/local/bin/kubectl -n pactum create secret generic pactum-app-secrets \
-                        --from-literal=DB_PASSWORD="$DB_PASSWORD" \
-                        --from-literal=DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" \
-                        --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+sudo /usr/local/bin/kubectl -n pactum create secret generic pactum-app-secrets \
+  --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+  --from-literal=DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" \
+  --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
 
-                        unset DB_PASSWORD DB_PASSWORD_B64 DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
+unset DB_PASSWORD DB_PASSWORD_B64 DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 
-                        sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
-                        deploy/kubernetes/backend-deployment.yaml \
-                        deploy/kubernetes/django-migration-job.yaml
+sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
+  deploy/kubernetes/backend-deployment.yaml \
+  deploy/kubernetes/django-migration-job.yaml
 
-                        sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-service.yaml
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-service.yaml
 
-                        sudo /usr/local/bin/kubectl -n pactum delete job pactum-django-migration --ignore-not-found=true
-                        sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/django-migration-job.yaml
-                        sudo /usr/local/bin/kubectl -n pactum wait --for=condition=complete job/pactum-django-migration --timeout=300s
+sudo /usr/local/bin/kubectl -n pactum delete job pactum-django-migration --ignore-not-found=true
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/django-migration-job.yaml
+sudo /usr/local/bin/kubectl -n pactum wait --for=condition=complete job/pactum-django-migration --timeout=300s
 
-                        sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-deployment.yaml
-                        sudo /usr/local/bin/kubectl -n pactum rollout status deployment/pactum-backend --timeout=300s
-                        sudo /usr/local/bin/kubectl -n pactum get pods -o wide
-                        sudo /usr/local/bin/kubectl -n pactum get service
-                        "@
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-deployment.yaml
+sudo /usr/local/bin/kubectl -n pactum rollout status deployment/pactum-backend --timeout=300s
+sudo /usr/local/bin/kubectl -n pactum get pods -o wide
+sudo /usr/local/bin/kubectl -n pactum get service
+"@
 
                         $inputObject = @{
                             InstanceIds = @($env:PACTUM_INSTANCE_ID)
