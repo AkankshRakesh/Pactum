@@ -4,6 +4,12 @@ metadata:
   name: pactum-backend
   namespace: pactum
 spec:
-  type: ClusterIP
-  selector: {app: pactum-backend}
-  ports: [{name: http, port: 8000, targetPort: http}]
+  type: NodePort
+  selector:
+    app: pactum-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      nodePort: 30080
+      protocol: TCP

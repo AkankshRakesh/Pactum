@@ -4,17 +4,31 @@ metadata:
   name: pactum-migrate
   namespace: pactum
 spec:
-  backoffLimit: 2
+  backoffLimit: 1
   activeDeadlineSeconds: 600
   template:
+    metadata:
+      labels:
+        app: pactum-migrate
     spec:
       restartPolicy: Never
       containers:
         - name: migrate
           image: BACKEND_IMAGE_PLACEHOLDER
-          command: ["python", "manage.py", "migrate", "--noinput"]
+          imagePullPolicy: Always
+          command:
+            - python
+            - manage.py
+            - migrate
           envFrom:
-            - secretRef: {name: pactum-app-secrets}
+            - secretRef:
+                name: pactum-app-secrets
           env:
-            - {name: AWS_REGION, value: AWS_REGION_PLACEHOLDER}
-            - {name: AWS_STORAGE_BUCKET_NAME, value: S3_BUCKET_PLACEHOLDER}
+            - name: DB_HOST
+              value: "aws-0-ap-south-1.pooler.supabase.com"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "postgres"
+            - name: DB_USER
+              value: "postgres.fpaupamwhoqwtmqnjjnn"

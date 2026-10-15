@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ContractLoader from "../ContractLoader";
 import { useConfirm } from "../../components/ConfirmDialog";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 async function readResponse(response: Response): Promise<Record<string, unknown>> {
   const text = await response.text();
