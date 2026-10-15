@@ -46,17 +46,17 @@ spec:
               port: 8000
             initialDelaySeconds: 30
             periodSeconds: 20
-      env:
-        - name: DB_HOST
-          value: "aws-0-ap-south-1.pooler.supabase.com"
-        - name: DB_PORT
-          value: "5432"
-        - name: DB_NAME
-          value: "postgres"
-        - name: DB_USER
-          value: "postgres.fpaupamwhoqwtmqnjjnn"
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: pactum-db-credentials
-              key: DB_PASSWORD
+          env:
+            - name: DB_HOST
+              value: "aws-0-ap-south-1.pooler.supabase.com"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "postgres"
+            - name: DB_USER
+              value: "postgres.fpaupamwhoqwtmqnjjnn"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pactum-db-credentials
+                  key: DB_PASSWORD
