@@ -137,6 +137,76 @@ pipeline {
             }
         }
 
+        
+        stage('Store Supabase Credentials') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ),
+                    string(
+                        credentialsId: 'pactum-db-password',
+                        variable: 'SUPABASE_DB_PASSWORD'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+
+                        $secretName = 'pactum/supabase-db'
+                        $secretFile = Join-Path $env:TEMP (
+                            'pactum-db-' + [guid]::NewGuid().ToString('N')
+                        )
+
+                        try {
+                            [IO.File]::WriteAllText(
+                                $secretFile,
+                                $env:SUPABASE_DB_PASSWORD,
+                                (New-Object Text.UTF8Encoding($false))
+                            )
+
+                            $secretUri = 'file://' + ($secretFile -replace '\\\\', '/')
+
+                            aws secretsmanager describe-secret `
+                                --region $env:AWS_REGION `
+                                --secret-id $secretName `
+                                --query ARN `
+                                --output text 2>$null
+
+                            $describeExit = $LASTEXITCODE
+
+                            if ($describeExit -eq 0) {
+                                aws secretsmanager put-secret-value `
+                                    --region $env:AWS_REGION `
+                                    --secret-id $secretName `
+                                    --secret-string $secretUri `
+                                    --no-cli-pager
+                            }
+                            else {
+                                aws secretsmanager create-secret `
+                                    --region $env:AWS_REGION `
+                                    --name $secretName `
+                                    --description 'Pactum Supabase PostgreSQL password' `
+                                    --secret-string $secretUri `
+                                    --no-cli-pager
+                            }
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Failed to store Supabase credentials in Secrets Manager.'
+                            }
+
+                            Write-Host 'Supabase database secret stored successfully.'
+                        }
+                        finally {
+                            Remove-Item $secretFile -Force -ErrorAction SilentlyContinue
+                        }
+                    '''
+                }
+            }
+        }
+
+
         stage('Provision Infrastructure') {
             steps {
                 withCredentials([

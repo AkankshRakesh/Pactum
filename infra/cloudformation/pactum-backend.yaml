@@ -1,5 +1,6 @@
+
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Pactum backend on EC2 with k3s, ALB, and private RDS PostgreSQL.
+Description: Pactum Django backend on EC2 with k3s and ALB, using Supabase PostgreSQL.
 
 Parameters:
   LatestAmiId:
@@ -13,26 +14,6 @@ Parameters:
       - t3.small
       - t3.medium
       - t3.large
-
-  DbName:
-    Type: String
-    Default: pactum
-    AllowedPattern: "^[A-Za-z][A-Za-z0-9_]*$"
-
-  DbUsername:
-    Type: String
-    Default: pactumadmin
-    AllowedPattern: "^[A-Za-z][A-Za-z0-9_]*$"
-
-  DbInstanceClass:
-    Type: String
-    Default: db.t3.micro
-
-  DjangoSecretKey:
-    Type: String
-    NoEcho: true
-    MinLength: 32
-    Description: Django SECRET_KEY supplied from Jenkins credentials.
 
 Resources:
   VPC:
@@ -95,22 +76,6 @@ Resources:
       SubnetId: !Ref PublicSubnetB
       RouteTableId: !Ref PublicRouteTable
 
-  PrivateSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.11.0/24
-      AvailabilityZone: !Select [0, !GetAZs ""]
-      MapPublicIpOnLaunch: false
-
-  PrivateSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.12.0/24
-      AvailabilityZone: !Select [1, !GetAZs ""]
-      MapPublicIpOnLaunch: false
-
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -138,17 +103,6 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-
-  DatabaseSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: PostgreSQL access from backend EC2
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref BackendSecurityGroup
 
   Alb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -191,53 +145,6 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref BackendTargetGroup
 
-  DatabaseSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "/${AWS::StackName}/database"
-      Description: Pactum RDS credentials
-      GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
-        GenerateStringKey: password
-        PasswordLength: 32
-        ExcludePunctuation: true
-
-  DjangoSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "/${AWS::StackName}/django-secret"
-      Description: Pactum Django secret key
-      SecretString: !Ref DjangoSecretKey
-
-  DatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Private Pactum database subnets
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-
-  Database:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      Engine: postgres
-      DBInstanceClass: !Ref DbInstanceClass
-      AllocatedStorage: 20
-      StorageType: gp3
-      StorageEncrypted: true
-      DBName: !Ref DbName
-      MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}"
-      DBSubnetGroupName: !Ref DatabaseSubnetGroup
-      VPCSecurityGroups:
-        - !Ref DatabaseSecurityGroup
-      PubliclyAccessible: false
-      MultiAZ: false
-      BackupRetentionPeriod: 1
-      DeletionProtection: false
-
   BackendInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -251,7 +158,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
-        - PolicyName: ReadPactumSecrets
+        - PolicyName: ReadPactumApplicationSecrets
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -259,8 +166,8 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref DatabaseSecret
-                  - !Ref DjangoSecret
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:pactum/supabase-db-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:pactum/django-secret-key-*"
 
   BackendInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -272,7 +179,7 @@ Resources:
     Type: AWS::EC2::Instance
     DependsOn:
       - PublicRoute
-      - Database
+      - AttachInternetGateway
     Properties:
       ImageId: !Ref LatestAmiId
       InstanceType: !Ref InstanceType
@@ -289,13 +196,17 @@ Resources:
             VolumeType: gp3
             Encrypted: true
             DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-backend"
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -euo pipefail
 
           dnf install -y curl
-          systemctl enable --now amazon-ssm-agent || true
+          command -v aws >/dev/null 2>&1 || dnf install -y awscli-2
+          systemctl enable --now amazon-ssm-agent
 
           curl -sfL https://get.k3s.io | \
             INSTALL_K3S_EXEC="server --write-kubeconfig-mode 600" sh -
@@ -321,21 +232,5 @@ Outputs:
     Value: !GetAtt Alb.DNSName
 
   BackendApiUrl:
-    Description: Temporary HTTP API URL
+    Description: Temporary HTTP API URL; configure HTTPS before production use
     Value: !Sub "http://${Alb.DNSName}"
-
-  DbEndpoint:
-    Description: RDS PostgreSQL endpoint
-    Value: !GetAtt Database.Endpoint.Address
-
-  DbPort:
-    Value: !GetAtt Database.Endpoint.Port
-
-  DbName:
-    Value: !Ref DbName
-
-  DatabaseSecretName:
-    Value: !Sub "/${AWS::StackName}/database"
-
-  DjangoSecretName:
-    Value: !Sub "/${AWS::StackName}/django-secret"
