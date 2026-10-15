@@ -1,80 +1,38 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  Pactum learning environment: VPC, public EKS worker subnets, private PostgreSQL RDS,
-  generated database credentials in Secrets Manager, and a private S3 bucket.
-  This template does not install an AWS Load Balancer Controller or grant application pods S3 access.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Pactum backend on EC2 with k3s, ALB, and private RDS PostgreSQL.
 
 Parameters:
-  ClusterName:
-    Type: String
-    Default: pactum-eks
-    Description: EKS cluster name
-    MinLength: 1
-    MaxLength: 100
-    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
-  KubernetesVersion:
+  InstanceType:
     Type: String
-    Default: '1.33'
-    Description: EKS Kubernetes version supported in this AWS region
-
-  EksPublicAccessCidrs:
-    Type: CommaDelimitedList
-    Description: >
-      CIDR blocks allowed to reach the public Kubernetes API endpoint.
-      Set this to your public IP with /32; do not use 0.0.0.0/0 unless intentionally required.
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
 
   DbName:
     Type: String
     Default: pactum
-    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]*$'
-    MinLength: 1
-    MaxLength: 63
+    AllowedPattern: "^[A-Za-z][A-Za-z0-9_]*$"
 
   DbUsername:
     Type: String
     Default: pactumadmin
-    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]*$'
-    MinLength: 1
-    MaxLength: 63
-    NoEcho: true
+    AllowedPattern: "^[A-Za-z][A-Za-z0-9_]*$"
 
   DbInstanceClass:
     Type: String
     Default: db.t3.micro
-    Description: RDS PostgreSQL instance class
 
-  NodeInstanceTypes:
-    Type: CommaDelimitedList
-    Default: t3.medium
-    Description: One or more EC2 instance types for the EKS managed node group
-
-  DesiredNodes:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 10
-
-  MaxNodes:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 20
-
-  ContractsBucketName:
+  DjangoSecretKey:
     Type: String
-    Description: Globally unique S3 bucket name for Pactum contract files
-    MinLength: 3
-    MaxLength: 63
-    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
-
-  AcmCertificateArn:
-    Type: String
-    Default: ''
-    Description: Optional ACM certificate ARN; currently not used because no ALB/controller is installed
-
-Conditions:
-  HasAcmCertificate: !Not [!Equals [!Ref AcmCertificateArn, '']]
+    NoEcho: true
+    MinLength: 32
+    Description: Django SECRET_KEY supplied from Jenkins credentials.
 
 Resources:
   VPC:
@@ -85,14 +43,10 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-vpc'
+          Value: !Sub "${AWS::StackName}-vpc"
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-igw'
 
   AttachInternetGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -104,11 +58,8 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-public-rt'
 
-  PublicDefaultRoute:
+  PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: AttachInternetGateway
     Properties:
@@ -120,195 +71,157 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: 10.0.0.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-public-a'
-        - Key: kubernetes.io/role/elb
-          Value: '1'
 
   PublicSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-public-b'
-        - Key: kubernetes.io/role/elb
-          Value: '1'
 
-  PublicSubnetARouteAssociation:
+  PublicRouteAssociationA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetA
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnetBRouteAssociation:
+  PublicRouteAssociationB:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetB
       RouteTableId: !Ref PublicRouteTable
 
-  DatabaseSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.0.10.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-db-a'
-
-  DatabaseSubnetB:
+  PrivateSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.11.0/24
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-db-b'
 
-  DatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
     Properties:
-      DBSubnetGroupDescription: Private subnets for Pactum PostgreSQL
-      SubnetIds:
-        - !Ref DatabaseSubnetA
-        - !Ref DatabaseSubnetB
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-db-subnets'
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
 
-  EKSClusterSecurityGroup:
+  AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Additional security group for the Pactum EKS cluster
+      GroupDescription: Public HTTP access to Pactum API
       VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-eks-cluster-sg'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Backend EC2 accepts NodePort traffic from ALB only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 30080
+          ToPort: 30080
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
 
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Permit PostgreSQL connections from within the Pactum VPC
+      GroupDescription: PostgreSQL access from backend EC2
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          CidrIp: 10.0.0.0/16
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-db-sg'
+          SourceSecurityGroupId: !Ref BackendSecurityGroup
 
-  EKSClusterRole:
-    Type: AWS::IAM::Role
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: eks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-eks-cluster-role'
-
-  EKSNodeRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-eks-node-role'
-
-  EKSCluster:
-    Type: AWS::EKS::Cluster
-    Properties:
-      Name: !Ref ClusterName
-      Version: !Ref KubernetesVersion
-      RoleArn: !GetAtt EKSClusterRole.Arn
-      ResourcesVpcConfig:
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
-          - !Ref DatabaseSubnetA
-          - !Ref DatabaseSubnetB
-        SecurityGroupIds:
-          - !Ref EKSClusterSecurityGroup
-        EndpointPublicAccess: true
-        EndpointPrivateAccess: true
-        PublicAccessCidrs: !Ref EksPublicAccessCidrs
-      Tags:
-        - Key: Name
-          Value: !Ref ClusterName
-    DependsOn:
-      - AttachInternetGateway
-      - PublicSubnetARouteAssociation
-      - PublicSubnetBRouteAssociation
-
-  EKSNodeGroup:
-    Type: AWS::EKS::Nodegroup
-    Properties:
-      ClusterName: !Ref EKSCluster
-      NodegroupName: !Sub '${ClusterName}-nodes'
-      NodeRole: !GetAtt EKSNodeRole.Arn
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
       Subnets:
         - !Ref PublicSubnetA
         - !Ref PublicSubnetB
-      InstanceTypes: !Ref NodeInstanceTypes
-      ScalingConfig:
-        MinSize: 1
-        DesiredSize: !Ref DesiredNodes
-        MaxSize: !Ref MaxNodes
-      CapacityType: ON_DEMAND
-      Tags:
-        Name: !Sub '${ClusterName}-nodes'
-    DependsOn:
-      - EKSCluster
-      - PublicSubnetARouteAssociation
-      - PublicSubnetBRouteAssociation
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 30080
+      TargetType: instance
+      Targets:
+        - Id: !Ref BackendInstance
+          Port: 30080
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: "200-499"
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 20
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
 
   DatabaseSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub '${AWS::StackName}/database'
-      Description: Generated credentials for Pactum PostgreSQL
+      Name: !Sub "/${AWS::StackName}/database"
+      Description: Pactum RDS credentials
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
         GenerateStringKey: password
-        PasswordLength: 24
+        PasswordLength: 32
         ExcludePunctuation: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-database-secret'
 
-  PostgreSQLDatabase:
-    Type: AWS::RDS::DBInstance
+  DjangoSecret:
+    Type: AWS::SecretsManager::Secret
     Properties:
-      DBInstanceIdentifier: !Sub '${AWS::StackName}-postgres'
+      Name: !Sub "/${AWS::StackName}/django-secret"
+      Description: Pactum Django secret key
+      SecretString: !Ref DjangoSecretKey
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private Pactum database subnets
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       Engine: postgres
       DBInstanceClass: !Ref DbInstanceClass
       AllocatedStorage: 20
@@ -316,70 +229,113 @@ Resources:
       StorageEncrypted: true
       DBName: !Ref DbName
       MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}::password}}'
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}"
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       VPCSecurityGroups:
         - !Ref DatabaseSecurityGroup
       PubliclyAccessible: false
+      MultiAZ: false
       BackupRetentionPeriod: 1
-      AutoMinorVersionUpgrade: true
       DeletionProtection: false
-      CopyTagsToSnapshot: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-postgres'
-    DependsOn:
-      - DatabaseSecret
-      - DatabaseSubnetGroup
 
-  ContractsBucket:
-    Type: AWS::S3::Bucket
+  BackendInstanceRole:
+    Type: AWS::IAM::Role
     Properties:
-      BucketName: !Ref ContractsBucketName
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-contracts'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadPactumSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseSecret
+                  - !Ref DjangoSecret
+
+  BackendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BackendInstanceRole
+
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - PublicRoute
+      - Database
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref BackendInstanceProfile
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref BackendSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          dnf install -y curl
+          systemctl enable --now amazon-ssm-agent || true
+
+          curl -sfL https://get.k3s.io | \
+            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 600" sh -
+
+          systemctl enable --now k3s
+
+          for i in $(seq 1 60); do
+            if /usr/local/bin/kubectl get nodes >/dev/null 2>&1; then
+              break
+            fi
+            sleep 10
+          done
+
+          /usr/local/bin/kubectl get nodes
 
 Outputs:
-  ClusterName:
-    Description: EKS cluster name
-    Value: !Ref EKSCluster
+  InstanceId:
+    Description: EC2 instance running k3s
+    Value: !Ref BackendInstance
 
-  ClusterEndpoint:
-    Description: Kubernetes API endpoint
-    Value: !GetAtt EKSCluster.Endpoint
+  LoadBalancerDNS:
+    Description: ALB DNS name for the backend API
+    Value: !GetAtt Alb.DNSName
 
-  VpcId:
-    Description: VPC identifier
-    Value: !Ref VPC
-
-  DbSecretArn:
-    Description: ARN of the Secrets Manager secret containing the database username and password
-    Value: !Ref DatabaseSecret
-
-  DbName:
-    Description: PostgreSQL database name
-    Value: !Ref DbName
+  BackendApiUrl:
+    Description: Temporary HTTP API URL
+    Value: !Sub "http://${Alb.DNSName}"
 
   DbEndpoint:
-    Description: PostgreSQL endpoint hostname
-    Value: !GetAtt PostgreSQLDatabase.Endpoint.Address
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt Database.Endpoint.Address
 
   DbPort:
-    Description: PostgreSQL port
-    Value: !GetAtt PostgreSQLDatabase.Endpoint.Port
+    Value: !GetAtt Database.Endpoint.Port
 
-  ContractsBucketName:
-    Description: S3 bucket name
-    Value: !Ref ContractsBucket
+  DbName:
+    Value: !Ref DbName
+
+  DatabaseSecretName:
+    Value: !Sub "/${AWS::StackName}/database"
+
+  DjangoSecretName:
+    Value: !Sub "/${AWS::StackName}/django-secret"

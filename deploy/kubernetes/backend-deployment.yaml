@@ -5,45 +5,44 @@ metadata:
   namespace: pactum
 spec:
   replicas: 2
-  revisionHistoryLimit: 5
+  revisionHistoryLimit: 3
   selector:
-    matchLabels: {app: pactum-backend}
+    matchLabels:
+      app: pactum-backend
   strategy:
     type: RollingUpdate
-    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
-      labels: {app: pactum-backend}
+      labels:
+        app: pactum-backend
     spec:
-      terminationGracePeriodSeconds: 30
       containers:
         - name: django
           image: BACKEND_IMAGE_PLACEHOLDER
           imagePullPolicy: Always
-          ports: [{name: http, containerPort: 8000}]
+          ports:
+            - name: http
+              containerPort: 8000
           envFrom:
-            - secretRef: {name: pactum-app-secrets}
-          env:
-            - {name: AWS_REGION, value: AWS_REGION_PLACEHOLDER}
-            - {name: AWS_STORAGE_BUCKET_NAME, value: S3_BUCKET_PLACEHOLDER}
-            - {name: DB_HOST, valueFrom: {secretKeyRef: {name: pactum-app-secrets, key: DB_HOST}}}
+            - secretRef:
+                name: pactum-app-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           readinessProbe:
-            httpGet: {path: /healthz/, port: http}
+            tcpSocket:
+              port: 8000
             initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
           livenessProbe:
-            httpGet: {path: /healthz/, port: http}
+            tcpSocket:
+              port: 8000
             initialDelaySeconds: 30
             periodSeconds: 20
-            timeoutSeconds: 3
-            failureThreshold: 3
-          resources:
-            requests: {cpu: 200m, memory: 256Mi}
-            limits: {cpu: '1', memory: 768Mi}
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            runAsUser: 10001
-            capabilities: {drop: [ALL]}
