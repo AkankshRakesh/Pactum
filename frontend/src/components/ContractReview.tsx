@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { CommentDeleteButton, CommentStatusBadge, type CommentStatus } from "./CommentStatus";
 import { useConfirm } from "./ConfirmDialog";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 type Comment = { id: number; clauseId?: string; clauseIndex?: number | null; quotedText?: string; authorName: string; authorUserId?: number | null; body: string; createdAt: string; status?: CommentStatus };
 type Contract = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: Comment[] };
