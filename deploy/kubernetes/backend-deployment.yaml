@@ -55,8 +55,3 @@ spec:
               value: "postgres"
             - name: DB_USER
               value: "postgres.fpaupamwhoqwtmqnjjnn"
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: pactum-db-credentials
-                  key: DB_PASSWORD
