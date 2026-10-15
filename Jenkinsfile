@@ -93,15 +93,26 @@ pipeline {
                     )
                 ]) {
                     powershell '''
-                        $ErrorActionPreference = 'Stop'
+                        $user = $env:DOCKERHUB_USER.Trim()
+                        $pass = $env:DOCKERHUB_PASS.Trim()
 
-                        $image = '{0}/pactum-backend:{1}' -f `
-                            $env:DOCKERHUB_USER, $env:IMAGE_TAG
+                        $tmp = Join-Path $env:TEMP ('dh-' + [guid]::NewGuid().ToString('N'))
 
-                        $env:DOCKERHUB_PASS |
-                            docker login -u $env:DOCKERHUB_USER --password-stdin
+                        try {
+                            [IO.File]::WriteAllText(
+                                $tmp,
+                                $pass,
+                                (New-Object Text.UTF8Encoding($false))
+                            )
 
-                        if ($LASTEXITCODE -ne 0) {
+                            cmd /c "docker login -u $user --password-stdin < `"$tmp`" 2>&1"
+                            $loginExit = $LASTEXITCODE
+                        }
+                        finally {
+                            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                        }
+
+                        if ($loginExit -ne 0) {
                             throw 'Docker Hub login failed.'
                         }
 
