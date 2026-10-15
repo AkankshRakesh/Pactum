@@ -490,11 +490,28 @@ echo "Remote deployment completed"
                                 ConvertTo-Json -Depth 8 |
                                 Set-Content -Path $inputPath -Encoding utf8
 
-                            $commandId = & aws ssm send-command `
-                                --region $env:AWS_REGION `
-                                --cli-input-json "file://$inputPath" `
-                                --query 'Command.CommandId' `
-                                --output text 2>&1
+                            
+                                $awsOutput = @(
+                                    & aws ssm send-command `
+                                        --region $env:AWS_REGION `
+                                        --cli-input-json "file://$inputPath" `
+                                        --query 'Command.CommandId' `
+                                        --output text 2>&1
+                                )
+
+                                $awsExitCode = $LASTEXITCODE
+                                $awsText = ($awsOutput | ForEach-Object { "$_" }) -join "`n"
+
+                                if ($awsExitCode -ne 0) {
+                                    throw "SSM send-command failed (exit $awsExitCode): $awsText"
+                                }
+
+                                $commandId = $awsText.Trim()
+
+                                if (-not $commandId -or $commandId -eq 'None') {
+                                    throw "AWS CLI returned no SSM command ID. Output: $awsText"
+                                }
+
 
                             if ($LASTEXITCODE -ne 0) {
                                 throw "SSM deployment submission failed: $commandId"
