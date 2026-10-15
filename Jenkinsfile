@@ -453,9 +453,29 @@ sudo /usr/local/bin/k3s kubectl -n pactum delete job \
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/django-migration-job.yaml
 
-sudo /usr/local/bin/k3s kubectl -n pactum wait \
-    --for=condition=complete job/pactum-migrate \
-    --timeout=300s
+if ! sudo /usr/local/bin/k3s kubectl wait \
+    --namespace pactum \
+    --for=condition=complete \
+    job/pactum-migrate \
+    --timeout=600s; then
+
+    echo "Migration Job failed or timed out."
+
+    sudo /usr/local/bin/k3s kubectl describe \
+        job/pactum-migrate -n pactum || true
+
+    sudo /usr/local/bin/k3s kubectl get pods \
+        -n pactum -l app=pactum-migrate -o wide || true
+
+    sudo /usr/local/bin/k3s kubectl logs \
+        -n pactum job/pactum-migrate \
+        --all-containers=true || true
+
+    sudo /usr/local/bin/k3s kubectl get events \
+        -n pactum --sort-by=.metadata.creationTimestamp || true
+
+    exit 1
+fi
 
 echo "Deploying backend"
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
