@@ -405,14 +405,31 @@ GITHUB_TOKEN="$(printf '%s' "$GITHUB_TOKEN_B64" | base64 -d)"
 AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
 export GIT_TERMINAL_PROMPT=0
 
-# Authenticate only for Git operations; do not persist the token in .git/config.
+# Clone only when the deployment checkout does not exist.
 if [ ! -d repo/.git ]; then
     git -c http.extraheader="$AUTH_HEADER" clone '__REPO__' repo
 fi
 
 cd repo
+
+# Fetch Git updates before selecting the exact commit built by Jenkins.
 git -c http.extraheader="$AUTH_HEADER" fetch origin
-git checkout '__COMMIT__'
+
+# This directory is a disposable deployment checkout.
+# Remove changes left by previous sed replacements or manual edits.
+# Do this BEFORE checkout so Git cannot reject the new commit.
+git reset --hard
+git clean -fd
+
+# Prefer the exact commit Jenkins built and pushed to Docker Hub.
+# Do not deploy whichever branch happens to be checked out locally.
+git checkout --force --detach '__COMMIT__'
+git reset --hard '__COMMIT__'
+git clean -fd
+
+echo "Deployment source commit:"
+git rev-parse HEAD
+
 unset GITHUB_TOKEN GITHUB_TOKEN_B64 AUTH_HEADER
 
 IMAGE='__IMAGE__'
@@ -437,7 +454,14 @@ sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-app-secre
 unset DB_PASSWORD DB_PASSWORD_B64
 unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 
-echo "Updating Kubernetes manifests"
+# Modify only after restoring the clean, exact Git commit.
+# These replacements are intentionally repeated on every deployment.
+echo "Updating Kubernetes image placeholders"
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' \
+    deploy/kubernetes/backend-deployment.yaml
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' \
+    deploy/kubernetes/django-migration-job.yaml
+
 sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
     deploy/kubernetes/backend-deployment.yaml \
     deploy/kubernetes/django-migration-job.yaml
@@ -481,8 +505,26 @@ echo "Deploying backend"
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/backend-deployment.yaml
 
-sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
-    deployment/pactum-backend --timeout=300s
+if ! sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
+    deployment/pactum-backend --timeout=300s; then
+
+    echo "Backend rollout failed or timed out."
+
+    sudo /usr/local/bin/k3s kubectl describe \
+        deployment/pactum-backend -n pactum || true
+
+    sudo /usr/local/bin/k3s kubectl get pods \
+        -n pactum -o wide || true
+
+    sudo /usr/local/bin/k3s kubectl logs \
+        -n pactum -l app=pactum-backend \
+        --all-containers=true --prefix=true --tail=100 || true
+
+    sudo /usr/local/bin/k3s kubectl get events \
+        -n pactum --sort-by=.metadata.creationTimestamp || true
+
+    exit 1
+fi
 
 echo "Final pod status"
 sudo /usr/local/bin/k3s kubectl -n pactum get pods -o wide
