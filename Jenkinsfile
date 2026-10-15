@@ -325,6 +325,7 @@ pipeline {
             }
         }
 
+        
         stage('Deploy Django Backend') {
             steps {
                 withCredentials([
@@ -350,13 +351,26 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
-                        # Encode for transport. Base64 is not encryption;
-                        # do not print these values.
-                        $dbBytes = [Text.Encoding]::UTF8.GetBytes($env:SUPABASE_DB_PASSWORD)
-                        $djangoBytes = [Text.Encoding]::UTF8.GetBytes($env:DJANGO_SECRET_KEY)
+                        if (-not $env:SUPABASE_DB_PASSWORD -or
+                            -not $env:DJANGO_SECRET_KEY) {
+                            throw 'Database password or Django secret key is empty.'
+                        }
 
-                        $dbB64 = [Convert]::ToBase64String($dbBytes)
-                        $djangoB64 = [Convert]::ToBase64String($djangoBytes)
+                        if (-not $env:PACTUM_INSTANCE_ID) {
+                            throw 'PACTUM_INSTANCE_ID is missing.'
+                        }
+
+                        $dbB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:SUPABASE_DB_PASSWORD
+                            )
+                        )
+
+                        $djangoB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:DJANGO_SECRET_KEY
+                            )
+                        )
 
                         $image = '{0}/pactum-backend:{1}' -f `
                             $env:DOCKERHUB_USER.Trim(), $env:IMAGE_TAG
@@ -364,10 +378,13 @@ pipeline {
                         $commit = $env:GIT_COMMIT_FULL
                         $repo = $env:GITHUB_REPO
 
-                        $remoteScript = @"
+                        # Single-quoted here-string: Bash variables and
+                        # command substitutions are NOT evaluated by PowerShell.
+                        $remoteScript = @'
 set -eu
 export DEBIAN_FRONTEND=noninteractive
 
+echo "Preparing deployment directory"
 sudo apt-get update
 sudo apt-get install -y git
 sudo mkdir -p /opt/pactum-deploy
@@ -375,44 +392,83 @@ sudo chown ubuntu:ubuntu /opt/pactum-deploy
 cd /opt/pactum-deploy
 
 if [ ! -d repo/.git ]; then
-  git clone '$repo' repo
+    git clone '__REPO__' repo
 fi
 
 cd repo
 git fetch origin
-git checkout '$commit'
+git checkout '__COMMIT__'
 
-IMAGE='$image'
-DB_PASSWORD_B64='$dbB64'
-DJANGO_SECRET_KEY_B64='$djangoB64'
+IMAGE='__IMAGE__'
+DB_PASSWORD_B64='__DB_B64__'
+DJANGO_SECRET_KEY_B64='__DJANGO_B64__'
 
 DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
 DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
 
-sudo /usr/local/bin/kubectl create namespace pactum --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+echo "Applying Kubernetes namespace"
+sudo /usr/local/bin/k3s kubectl create namespace pactum \
+    --dry-run=client -o yaml |
+    sudo /usr/local/bin/k3s kubectl apply -f -
 
-sudo /usr/local/bin/kubectl -n pactum create secret generic pactum-app-secrets \
-  --from-literal=DB_PASSWORD="$DB_PASSWORD" \
-  --from-literal=DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" \
-  --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+echo "Updating application secrets"
+sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-app-secrets \
+    --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+    --from-literal=DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" \
+    --dry-run=client -o yaml |
+    sudo /usr/local/bin/k3s kubectl apply -f -
 
-unset DB_PASSWORD DB_PASSWORD_B64 DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
+unset DB_PASSWORD DB_PASSWORD_B64
+unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 
+echo "Updating Kubernetes manifests"
 sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
-  deploy/kubernetes/backend-deployment.yaml \
-  deploy/kubernetes/django-migration-job.yaml
+    deploy/kubernetes/backend-deployment.yaml \
+    deploy/kubernetes/django-migration-job.yaml
 
-sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-service.yaml
+echo "Applying backend service"
+sudo /usr/local/bin/k3s kubectl apply -n pactum \
+    -f deploy/kubernetes/backend-service.yaml
 
-sudo /usr/local/bin/kubectl -n pactum delete job pactum-django-migration --ignore-not-found=true
-sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/django-migration-job.yaml
-sudo /usr/local/bin/kubectl -n pactum wait --for=condition=complete job/pactum-django-migration --timeout=300s
+echo "Running database migrations"
+sudo /usr/local/bin/k3s kubectl -n pactum delete job \
+    pactum-django-migration --ignore-not-found=true
 
-sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-deployment.yaml
-sudo /usr/local/bin/kubectl -n pactum rollout status deployment/pactum-backend --timeout=300s
-sudo /usr/local/bin/kubectl -n pactum get pods -o wide
-sudo /usr/local/bin/kubectl -n pactum get service
-"@
+sudo /usr/local/bin/k3s kubectl apply -n pactum \
+    -f deploy/kubernetes/django-migration-job.yaml
+
+sudo /usr/local/bin/k3s kubectl -n pactum wait \
+    --for=condition=complete job/pactum-django-migration \
+    --timeout=300s
+
+echo "Deploying backend"
+sudo /usr/local/bin/k3s kubectl apply -n pactum \
+    -f deploy/kubernetes/backend-deployment.yaml
+
+sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
+    deployment/pactum-backend --timeout=300s
+
+echo "Final pod status"
+sudo /usr/local/bin/k3s kubectl -n pactum get pods -o wide
+
+echo "Service status"
+sudo /usr/local/bin/k3s kubectl -n pactum get service
+
+echo "Remote deployment completed"
+'@
+
+                        # Insert only controlled values into the literal script.
+                        $remoteScript = $remoteScript.Replace(
+                            '__REPO__', $repo
+                        ).Replace(
+                            '__COMMIT__', $commit
+                        ).Replace(
+                            '__IMAGE__', $image
+                        ).Replace(
+                            '__DB_B64__', $dbB64
+                        ).Replace(
+                            '__DJANGO_B64__', $djangoB64
+                        )
 
                         $inputObject = @{
                             InstanceIds = @($env:PACTUM_INSTANCE_ID)
@@ -425,7 +481,8 @@ sudo /usr/local/bin/kubectl -n pactum get service
                         }
 
                         $inputPath = Join-Path $env:TEMP (
-                            'pactum-deploy-' + [guid]::NewGuid().ToString('N') + '.json'
+                            'pactum-deploy-' +
+                            [guid]::NewGuid().ToString('N') + '.json'
                         )
 
                         try {
@@ -440,11 +497,12 @@ sudo /usr/local/bin/kubectl -n pactum get service
                                 --output text 2>&1
 
                             if ($LASTEXITCODE -ne 0) {
-                                throw "SSM deployment command failed to submit: $commandId"
+                                throw "SSM deployment submission failed: $commandId"
                             }
                         }
                         finally {
-                            Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
+                            Remove-Item $inputPath -Force `
+                                -ErrorAction SilentlyContinue
                         }
 
                         $commandId = "$commandId".Trim()
@@ -471,7 +529,9 @@ sudo /usr/local/bin/kubectl -n pactum get service
                                 break
                             }
 
-                            if ($status -in @('Failed', 'Cancelled', 'TimedOut')) {
+                            if ($status -in @(
+                                'Failed', 'Cancelled', 'TimedOut'
+                            )) {
                                 break
                             }
                         }
