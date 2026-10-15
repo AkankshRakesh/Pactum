@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -11,19 +12,11 @@ pipeline {
     environment {
         AWS_REGION = 'ap-south-1'
         AWS_DEFAULT_REGION = 'ap-south-1'
-
-        // Use a new stack name while testing; do not replace your old stack.
         STACK_NAME = 'pactum-backend'
-
-        DB_NAME = 'pactum'
-        DB_USERNAME = 'pactumadmin'
-        DB_INSTANCE_CLASS = 'db.t3.micro'
         INSTANCE_TYPE = 't3.medium'
-
         K8S_NAMESPACE = 'pactum'
-
-        // CHANGE THIS to the exact origin of your Vercel deployment.
         VERCEL_ORIGIN = 'https://pactum-sable.vercel.app'
+        GITHUB_REPO = 'https://github.com/AkankshRakesh/Pactum.git'
     }
 
     stages {
@@ -32,12 +25,14 @@ pipeline {
                 checkout scm
 
                 script {
-                    env.IMAGE_TAG = powershell(
+                    env.GIT_COMMIT_FULL = powershell(
                         returnStdout: true,
-                        script: 'git rev-parse --short=12 HEAD'
+                        script: 'git rev-parse HEAD'
                     ).trim()
 
-                    if (!env.IMAGE_TAG) {
+                    env.IMAGE_TAG = env.GIT_COMMIT_FULL.take(12)
+
+                    if (!env.IMAGE_TAG || !env.GIT_COMMIT_FULL) {
                         error('Could not determine the Git commit SHA.')
                     }
 
@@ -47,7 +42,7 @@ pipeline {
                 powershell '''
                     $ErrorActionPreference = 'Stop'
 
-                    foreach ($tool in @('aws', 'docker')) {
+                    foreach ($tool in @('aws', 'docker', 'git')) {
                         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
                             throw "Missing required tool: $tool"
                         }
@@ -67,15 +62,11 @@ pipeline {
                         }
                     }
 
-                    if ($env:VERCEL_ORIGIN -match 'REPLACE-WITH') {
-                        throw 'Set VERCEL_ORIGIN in the Jenkinsfile to your real Vercel origin.'
-                    }
-
                     if ($env:VERCEL_ORIGIN -notmatch '^https://[A-Za-z0-9.-]+$') {
                         throw 'VERCEL_ORIGIN must be an HTTPS origin without a path.'
                     }
 
-                    docker info
+                    docker info 2>&1 | Out-Null
                     if ($LASTEXITCODE -ne 0) {
                         throw 'Docker is unavailable. Start Docker Desktop in Linux-container mode.'
                     }
@@ -93,32 +84,34 @@ pipeline {
                     )
                 ]) {
                     powershell '''
+                        $ErrorActionPreference = 'Stop'
                         $user = $env:DOCKERHUB_USER.Trim()
                         $pass = $env:DOCKERHUB_PASS.Trim()
 
-                        $tmp = Join-Path $env:TEMP ('dh-' + [guid]::NewGuid().ToString('N'))
+                        if (-not $user -or -not $pass) {
+                            throw 'Docker Hub credentials are empty.'
+                        }
+
+                        $tmp = Join-Path $env:TEMP (
+                            'dh-' + [guid]::NewGuid().ToString('N')
+                        )
 
                         try {
                             [IO.File]::WriteAllText(
                                 $tmp,
                                 $pass,
-                                (New-Object Text.UTF8Encoding($false))
+                                [System.Text.UTF8Encoding]::new($false)
                             )
 
                             cmd /c "docker login -u $user --password-stdin < `"$tmp`" 2>&1"
                             $loginExit = $LASTEXITCODE
-                        }
-                        finally {
-                            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-                        }
 
-                        if ($loginExit -ne 0) {
-                            throw 'Docker Hub login failed.'
-                        }
+                            if ($loginExit -ne 0) {
+                                throw 'Docker Hub login failed.'
+                            }
 
-                        $image = "${user}/pactum-backend:$($env:IMAGE_TAG)"
+                            $image = '{0}/pactum-backend:{1}' -f $user, $env:IMAGE_TAG
 
-                        try {
                             docker build -t $image backend
                             if ($LASTEXITCODE -ne 0) {
                                 throw 'Backend Docker build failed.'
@@ -128,84 +121,17 @@ pipeline {
                             if ($LASTEXITCODE -ne 0) {
                                 throw 'Backend Docker push failed.'
                             }
+
+                            Write-Host "Published image: $image"
                         }
                         finally {
-                            docker logout
+                            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                            docker logout 2>&1 | Out-Null
                         }
                     '''
                 }
             }
         }
-
-        
-        stage('Store Supabase Credentials') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ),
-                    string(
-                        credentialsId: 'pactum-db-password',
-                        variable: 'SUPABASE_DB_PASSWORD'
-                    )
-                ]) {
-                    powershell '''
-                        $ErrorActionPreference = 'Stop'
-
-                        $secretName = 'pactum/supabase-db'
-                        $secretFile = Join-Path $env:TEMP (
-                            'pactum-db-' + [guid]::NewGuid().ToString('N')
-                        )
-
-                        try {
-                            [IO.File]::WriteAllText(
-                                $secretFile,
-                                $env:SUPABASE_DB_PASSWORD,
-                                (New-Object Text.UTF8Encoding($false))
-                            )
-
-                            $secretUri = 'file://' + ($secretFile -replace '\\\\', '/')
-
-                            aws secretsmanager describe-secret `
-                                --region $env:AWS_REGION `
-                                --secret-id $secretName `
-                                --query ARN `
-                                --output text 2>$null
-
-                            $describeExit = $LASTEXITCODE
-
-                            if ($describeExit -eq 0) {
-                                aws secretsmanager put-secret-value `
-                                    --region $env:AWS_REGION `
-                                    --secret-id $secretName `
-                                    --secret-string $secretUri `
-                                    --no-cli-pager
-                            }
-                            else {
-                                aws secretsmanager create-secret `
-                                    --region $env:AWS_REGION `
-                                    --name $secretName `
-                                    --description 'Pactum Supabase PostgreSQL password' `
-                                    --secret-string $secretUri `
-                                    --no-cli-pager
-                            }
-
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Failed to store Supabase credentials in Secrets Manager.'
-                            }
-
-                            Write-Host 'Supabase database secret stored successfully.'
-                        }
-                        finally {
-                            Remove-Item $secretFile -Force -ErrorAction SilentlyContinue
-                        }
-                    '''
-                }
-            }
-        }
-
 
         stage('Provision Infrastructure') {
             steps {
@@ -214,62 +140,73 @@ pipeline {
                         credentialsId: 'aws-creds',
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ),
-                    string(
-                        credentialsId: 'pactum-django-secret-key',
-                        variable: 'DJANGO_SECRET_KEY'
                     )
                 ]) {
-                    powershell '''
-                        $ErrorActionPreference = 'Stop'
+                    script {
+                        def result = powershell(
+                            returnStdout: true,
+                            script: '''
+                                $ErrorActionPreference = 'Stop'
 
-                        aws sts get-caller-identity
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'AWS credentials are invalid.'
+                                $identity = & aws sts get-caller-identity `
+                                    --region $env:AWS_REGION 2>&1
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "AWS credentials failed: $identity"
+                                }
+
+                                $deployOutput = & aws cloudformation deploy `
+                                    --region $env:AWS_REGION `
+                                    --stack-name $env:STACK_NAME `
+                                    --template-file infra/cloudformation/pactum-backend.yaml `
+                                    --capabilities CAPABILITY_NAMED_IAM `
+                                    --parameter-overrides "InstanceType=$env:INSTANCE_TYPE" `
+                                    --no-fail-on-empty-changeset 2>&1
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "CloudFormation deployment failed: $deployOutput"
+                                }
+
+                                $raw = & aws cloudformation describe-stacks `
+                                    --region $env:AWS_REGION `
+                                    --stack-name $env:STACK_NAME `
+                                    --query "Stacks[0].Outputs" `
+                                    --output json 2>&1
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Could not retrieve CloudFormation outputs: $raw"
+                                }
+
+                                $outputs = @{}
+                                foreach ($item in ($raw | ConvertFrom-Json)) {
+                                    $outputs[$item.OutputKey] = $item.OutputValue
+                                }
+
+                                if (-not $outputs.InstanceId -or -not $outputs.LoadBalancerDNS) {
+                                    throw 'Required outputs InstanceId or LoadBalancerDNS are missing.'
+                                }
+
+                                Write-Output "INSTANCE_ID=$($outputs.InstanceId)"
+                                Write-Output "ALB_DNS=$($outputs.LoadBalancerDNS)"
+                            '''
+                        ).trim()
+
+                        def instanceLine = result.readLines().find {
+                            it.startsWith('INSTANCE_ID=')
+                        }
+                        def albLine = result.readLines().find {
+                            it.startsWith('ALB_DNS=')
                         }
 
-                        aws cloudformation deploy `
-                            --region $env:AWS_REGION `
-                            --stack-name $env:STACK_NAME `
-                            --template-file infra/cloudformation/pactum-backend.yaml `
-                            --capabilities CAPABILITY_NAMED_IAM `
-                            --parameter-overrides `
-                                "DbName=$env:DB_NAME" `
-                                "DbUsername=$env:DB_USERNAME" `
-                                "DbInstanceClass=$env:DB_INSTANCE_CLASS" `
-                                "InstanceType=$env:INSTANCE_TYPE" `
-                                "DjangoSecretKey=$env:DJANGO_SECRET_KEY" `
-                            --no-fail-on-empty-changeset
-
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'CloudFormation deployment failed.'
+                        if (!instanceLine || !albLine) {
+                            error("Could not parse CloudFormation outputs. Output: ${result}")
                         }
 
-                        $rawOutputs = aws cloudformation describe-stacks `
-                            --region $env:AWS_REGION `
-                            --stack-name $env:STACK_NAME `
-                            --query "Stacks[0].Outputs" `
-                            --output json
+                        env.PACTUM_INSTANCE_ID = instanceLine.substring('INSTANCE_ID='.length())
+                        env.PACTUM_ALB_DNS = albLine.substring('ALB_DNS='.length())
 
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not retrieve CloudFormation outputs.'
-                        }
-
-                        $outputs = @{}
-                        foreach ($item in ($rawOutputs | ConvertFrom-Json)) {
-                            $outputs[$item.OutputKey] = $item.OutputValue
-                        }
-
-                        if (-not $outputs.InstanceId -or -not $outputs.LoadBalancerDNS) {
-                            throw 'Required CloudFormation outputs are missing.'
-                        }
-
-                        $env:PACTUM_INSTANCE_ID = $outputs.InstanceId
-                        $env:PACTUM_ALB_DNS = $outputs.LoadBalancerDNS
-
-                        Write-Host "EC2 instance: $env:PACTUM_INSTANCE_ID"
-                        Write-Host "ALB DNS: $env:PACTUM_ALB_DNS"
-                    '''
+                        echo "EC2 instance: ${env.PACTUM_INSTANCE_ID}"
+                        echo "Load balancer: http://${env.PACTUM_ALB_DNS}"
+                    }
                 }
             }
         }
@@ -285,17 +222,16 @@ pipeline {
                 ]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
-
                         $online = $false
 
                         for ($i = 0; $i -lt 60; $i++) {
-                            $status = aws ssm describe-instance-information `
+                            $status = & aws ssm describe-instance-information `
                                 --region $env:AWS_REGION `
                                 --filters "Key=InstanceIds,Values=$env:PACTUM_INSTANCE_ID" `
                                 --query "InstanceInformationList[0].PingStatus" `
-                                --output text 2>$null
+                                --output text 2>&1
 
-                            if ($LASTEXITCODE -eq 0 -and $status.Trim() -eq 'Online') {
+                            if ($LASTEXITCODE -eq 0 -and "$status".Trim() -eq 'Online') {
                                 $online = $true
                                 break
                             }
@@ -304,7 +240,7 @@ pipeline {
                         }
 
                         if (-not $online) {
-                            throw 'EC2 did not register as an online SSM managed instance within 10 minutes.'
+                            throw 'EC2 did not become an online SSM managed instance within 10 minutes.'
                         }
 
                         $commands = @(
@@ -316,45 +252,51 @@ pipeline {
                             InstanceIds = @($env:PACTUM_INSTANCE_ID)
                             DocumentName = 'AWS-RunShellScript'
                             Comment = 'Verify Pactum k3s installation'
-                            Parameters = @{
-                                commands = $commands
-                            }
+                            Parameters = @{ commands = $commands }
                             TimeoutSeconds = 120
                         }
 
-                        $inputPath = Join-Path $env:TEMP 'pactum-ssm-check.json'
-                        $inputObject |
-                            ConvertTo-Json -Depth 8 |
-                            Set-Content -Path $inputPath -Encoding ascii
+                        $inputPath = Join-Path $env:TEMP (
+                            'pactum-ssm-check-' + [guid]::NewGuid().ToString('N') + '.json'
+                        )
 
-                        $commandId = aws ssm send-command `
-                            --region $env:AWS_REGION `
-                            --cli-input-json "file://$inputPath" `
-                            --query "Command.CommandId" `
-                            --output text
+                        try {
+                            $inputObject |
+                                ConvertTo-Json -Depth 8 |
+                                Set-Content -Path $inputPath -Encoding ascii
 
-                        if ($LASTEXITCODE -ne 0) {
-                            throw 'Could not send the k3s verification command.'
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$inputPath" `
+                                --query 'Command.CommandId' `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Could not send k3s verification command: $commandId"
+                            }
+                        }
+                        finally {
+                            Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
                         }
 
-                        $commandId = $commandId.Trim()
+                        $commandId = "$commandId".Trim()
                         $complete = $false
 
                         for ($i = 0; $i -lt 30; $i++) {
                             Start-Sleep -Seconds 5
 
-                            $status = aws ssm get-command-invocation `
+                            $status = & aws ssm get-command-invocation `
                                 --region $env:AWS_REGION `
                                 --command-id $commandId `
                                 --instance-id $env:PACTUM_INSTANCE_ID `
                                 --query Status `
-                                --output text 2>$null
+                                --output text 2>&1
 
                             if ($LASTEXITCODE -ne 0) {
                                 continue
                             }
 
-                            $status = $status.Trim()
+                            $status = "$status".Trim()
 
                             if ($status -eq 'Success') {
                                 $complete = $true
@@ -367,15 +309,17 @@ pipeline {
                         }
 
                         if (-not $complete) {
-                            $details = aws ssm get-command-invocation `
+                            $details = & aws ssm get-command-invocation `
                                 --region $env:AWS_REGION `
                                 --command-id $commandId `
                                 --instance-id $env:PACTUM_INSTANCE_ID `
                                 --query StandardErrorContent `
-                                --output text 2>$null
+                                --output text 2>&1
 
                             throw "k3s verification failed: $details"
                         }
+
+                        Write-Host 'SSM and k3s are ready.'
                     '''
                 }
             }
@@ -388,20 +332,173 @@ pipeline {
                         credentialsId: 'aws-creds',
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ),
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASS'
+                    ),
+                    string(
+                        credentialsId: 'pactum-db-password',
+                        variable: 'SUPABASE_DB_PASSWORD'
+                    ),
+                    string(
+                        credentialsId: 'pactum-django-secret-key',
+                        variable: 'DJANGO_SECRET_KEY'
                     )
                 ]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
-                        $image = '{0}/pactum-backend:{1}' -f `
-                            (git config --get user.name), $env:IMAGE_TAG
+                        # Encode for transport. Base64 is not encryption;
+                        # do not print these values.
+                        $dbBytes = [Text.Encoding]::UTF8.GetBytes($env:SUPABASE_DB_PASSWORD)
+                        $djangoBytes = [Text.Encoding]::UTF8.GetBytes($env:DJANGO_SECRET_KEY)
 
-                        # Use the actual Docker Hub username from the credential
-                        # rather than Git configuration.
-                        $dockerCred = Get-Content Env:DOCKERHUB_USER -ErrorAction SilentlyContinue
-                        if (-not $dockerCred) {
-                            throw 'Docker Hub username is unavailable for the deployment image.'
+                        $dbB64 = [Convert]::ToBase64String($dbBytes)
+                        $djangoB64 = [Convert]::ToBase64String($djangoBytes)
+
+                        $image = '{0}/pactum-backend:{1}' -f `
+                            $env:DOCKERHUB_USER.Trim(), $env:IMAGE_TAG
+
+                        $commit = $env:GIT_COMMIT_FULL
+                        $repo = $env:GITHUB_REPO
+
+                        $remoteScript = @"
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+
+sudo dnf install -y git
+sudo mkdir -p /opt/pactum-deploy
+sudo chown ec2-user:ec2-user /opt/pactum-deploy
+cd /opt/pactum-deploy
+
+if [ ! -d repo/.git ]; then
+  git clone '$repo' repo
+fi
+
+cd repo
+git fetch origin
+git checkout '$commit'
+
+IMAGE='$image'
+DB_PASSWORD_B64='$dbB64'
+DJANGO_SECRET_KEY_B64='$djangoB64'
+
+DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
+DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
+
+sudo /usr/local/bin/kubectl create namespace pactum --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+
+sudo /usr/local/bin/kubectl -n pactum create secret generic pactum-app-secrets \
+  --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+  --from-literal=DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" \
+  --dry-run=client -o yaml | sudo /usr/local/bin/kubectl apply -f -
+
+unset DB_PASSWORD DB_PASSWORD_B64 DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
+
+sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
+  deploy/kubernetes/backend-deployment.yaml \
+  deploy/kubernetes/django-migration-job.yaml
+
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-service.yaml
+
+sudo /usr/local/bin/kubectl -n pactum delete job pactum-django-migration --ignore-not-found=true
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/django-migration-job.yaml
+sudo /usr/local/bin/kubectl -n pactum wait --for=condition=complete job/pactum-django-migration --timeout=300s
+
+sudo /usr/local/bin/kubectl apply -n pactum -f deploy/kubernetes/backend-deployment.yaml
+sudo /usr/local/bin/kubectl -n pactum rollout status deployment/pactum-backend --timeout=300s
+sudo /usr/local/bin/kubectl -n pactum get pods -o wide
+sudo /usr/local/bin/kubectl -n pactum get service
+"@
+
+                        $inputObject = @{
+                            InstanceIds = @($env:PACTUM_INSTANCE_ID)
+                            DocumentName = 'AWS-RunShellScript'
+                            Comment = "Deploy Pactum backend $($env:IMAGE_TAG)"
+                            Parameters = @{
+                                commands = @($remoteScript)
+                            }
+                            TimeoutSeconds = 900
                         }
+
+                        $inputPath = Join-Path $env:TEMP (
+                            'pactum-deploy-' + [guid]::NewGuid().ToString('N') + '.json'
+                        )
+
+                        try {
+                            $inputObject |
+                                ConvertTo-Json -Depth 8 |
+                                Set-Content -Path $inputPath -Encoding utf8
+
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$inputPath" `
+                                --query 'Command.CommandId' `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "SSM deployment command failed to submit: $commandId"
+                            }
+                        }
+                        finally {
+                            Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $commandId = "$commandId".Trim()
+                        $finished = $false
+
+                        for ($i = 0; $i -lt 180; $i++) {
+                            Start-Sleep -Seconds 5
+
+                            $status = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $env:PACTUM_INSTANCE_ID `
+                                --query Status `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                continue
+                            }
+
+                            $status = "$status".Trim()
+
+                            if ($status -eq 'Success') {
+                                $finished = $true
+                                break
+                            }
+
+                            if ($status -in @('Failed', 'Cancelled', 'TimedOut')) {
+                                break
+                            }
+                        }
+
+                        $stdout = & aws ssm get-command-invocation `
+                            --region $env:AWS_REGION `
+                            --command-id $commandId `
+                            --instance-id $env:PACTUM_INSTANCE_ID `
+                            --query StandardOutputContent `
+                            --output text 2>&1
+
+                        if ($stdout) {
+                            Write-Host $stdout
+                        }
+
+                        if (-not $finished) {
+                            $stderr = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $env:PACTUM_INSTANCE_ID `
+                                --query StandardErrorContent `
+                                --output text 2>&1
+
+                            throw "Remote deployment failed. SSM stderr: $stderr"
+                        }
+
+                        Write-Host "Deployment succeeded for image $image"
+                        Write-Host "Backend load balancer: http://$env:PACTUM_ALB_DNS"
                     '''
                 }
             }
@@ -409,8 +506,14 @@ pipeline {
     }
 
     post {
+        success {
+            echo 'Pactum backend deployment completed successfully.'
+        }
+        failure {
+            echo 'Pactum backend pipeline failed. Inspect the first failed stage and its SSM output.'
+        }
         always {
-            echo 'Pactum backend pipeline finished. Review the stage logs for the first failure.'
+            echo 'Pipeline finished.'
         }
     }
 }
