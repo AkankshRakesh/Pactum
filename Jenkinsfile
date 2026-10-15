@@ -13,7 +13,7 @@ pipeline {
         AWS_REGION = 'ap-south-1'
         AWS_DEFAULT_REGION = 'ap-south-1'
         STACK_NAME = 'pactum-backend'
-        INSTANCE_TYPE = 't3.medium'
+        INSTANCE_TYPE = 'c7i-flex.large'
         K8S_NAMESPACE = 'pactum'
         VERCEL_ORIGIN = 'https://pactum-sable.vercel.app'
         GITHUB_REPO = 'https://github.com/AkankshRakesh/Pactum.git'
