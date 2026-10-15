@@ -23,7 +23,7 @@ pipeline {
         K8S_NAMESPACE = 'pactum'
 
         // CHANGE THIS to the exact origin of your Vercel deployment.
-        VERCEL_ORIGIN = 'https://pactum-sable.vercel.app/'
+        VERCEL_ORIGIN = 'https://pactum-sable.vercel.app'
     }
 
     stages {
