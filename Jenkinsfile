@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -244,7 +243,7 @@ pipeline {
                         }
 
                         $commands = @(
-                            'sudo /usr/local/bin/kubectl get nodes',
+                            'sudo /usr/local/bin/k3s kubectl get nodes',
                             'sudo systemctl is-active k3s'
                         )
 
@@ -325,7 +324,6 @@ pipeline {
             }
         }
 
-        
         stage('Deploy Django Backend') {
             steps {
                 withCredentials([
@@ -346,14 +344,19 @@ pipeline {
                     string(
                         credentialsId: 'pactum-django-secret-key',
                         variable: 'DJANGO_SECRET_KEY'
+                    ),
+                    string(
+                        credentialsId: 'github-pactum-token',
+                        variable: 'GITHUB_TOKEN'
                     )
                 ]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
 
                         if (-not $env:SUPABASE_DB_PASSWORD -or
-                            -not $env:DJANGO_SECRET_KEY) {
-                            throw 'Database password or Django secret key is empty.'
+                            -not $env:DJANGO_SECRET_KEY -or
+                            -not $env:GITHUB_TOKEN) {
+                            throw 'Database password, Django secret key, or GitHub token is empty.'
                         }
 
                         if (-not $env:PACTUM_INSTANCE_ID) {
@@ -372,14 +375,20 @@ pipeline {
                             )
                         )
 
+                        # Base64 is transport encoding, not encryption.
+                        # Never print the encoded token or remote script.
+                        $githubTokenB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:GITHUB_TOKEN.Trim()
+                            )
+                        )
+
                         $image = '{0}/pactum-backend:{1}' -f `
                             $env:DOCKERHUB_USER.Trim(), $env:IMAGE_TAG
 
                         $commit = $env:GIT_COMMIT_FULL
                         $repo = $env:GITHUB_REPO
 
-                        # Single-quoted here-string: Bash variables and
-                        # command substitutions are NOT evaluated by PowerShell.
                         $remoteScript = @'
 set -eu
 export DEBIAN_FRONTEND=noninteractive
@@ -391,13 +400,37 @@ sudo mkdir -p /opt/pactum-deploy
 sudo chown ubuntu:ubuntu /opt/pactum-deploy
 cd /opt/pactum-deploy
 
+GITHUB_TOKEN_B64='__GITHUB_TOKEN_B64__'
+GITHUB_TOKEN="$(printf '%s' "$GITHUB_TOKEN_B64" | base64 -d)"
+AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+export GIT_TERMINAL_PROMPT=0
+
+# Clone only when the deployment checkout does not exist.
 if [ ! -d repo/.git ]; then
-    git clone '__REPO__' repo
+    git -c http.extraheader="$AUTH_HEADER" clone '__REPO__' repo
 fi
 
 cd repo
-git fetch origin
-git checkout '__COMMIT__'
+
+# Fetch Git updates before selecting the exact commit built by Jenkins.
+git -c http.extraheader="$AUTH_HEADER" fetch origin
+
+# This directory is a disposable deployment checkout.
+# Remove changes left by previous sed replacements or manual edits.
+# Do this BEFORE checkout so Git cannot reject the new commit.
+git reset --hard
+git clean -fd
+
+# Prefer the exact commit Jenkins built and pushed to Docker Hub.
+# Do not deploy whichever branch happens to be checked out locally.
+git checkout --force --detach '__COMMIT__'
+git reset --hard '__COMMIT__'
+git clean -fd
+
+echo "Deployment source commit:"
+git rev-parse HEAD
+
+unset GITHUB_TOKEN GITHUB_TOKEN_B64 AUTH_HEADER
 
 IMAGE='__IMAGE__'
 DB_PASSWORD_B64='__DB_B64__'
@@ -421,7 +454,14 @@ sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-app-secre
 unset DB_PASSWORD DB_PASSWORD_B64
 unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 
-echo "Updating Kubernetes manifests"
+# Modify only after restoring the clean, exact Git commit.
+# These replacements are intentionally repeated on every deployment.
+echo "Updating Kubernetes image placeholders"
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' \
+    deploy/kubernetes/backend-deployment.yaml
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' \
+    deploy/kubernetes/django-migration-job.yaml
+
 sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
     deploy/kubernetes/backend-deployment.yaml \
     deploy/kubernetes/django-migration-job.yaml
@@ -432,21 +472,59 @@ sudo /usr/local/bin/k3s kubectl apply -n pactum \
 
 echo "Running database migrations"
 sudo /usr/local/bin/k3s kubectl -n pactum delete job \
-    pactum-django-migration --ignore-not-found=true
+    pactum-migrate --ignore-not-found=true
 
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/django-migration-job.yaml
 
-sudo /usr/local/bin/k3s kubectl -n pactum wait \
-    --for=condition=complete job/pactum-django-migration \
-    --timeout=300s
+if ! sudo /usr/local/bin/k3s kubectl wait \
+    --namespace pactum \
+    --for=condition=complete \
+    job/pactum-migrate \
+    --timeout=600s; then
+
+    echo "Migration Job failed or timed out."
+
+    sudo /usr/local/bin/k3s kubectl describe \
+        job/pactum-migrate -n pactum || true
+
+    sudo /usr/local/bin/k3s kubectl get pods \
+        -n pactum -l app=pactum-migrate -o wide || true
+
+    sudo /usr/local/bin/k3s kubectl logs \
+        -n pactum job/pactum-migrate \
+        --all-containers=true || true
+
+    sudo /usr/local/bin/k3s kubectl get events \
+        -n pactum --sort-by=.metadata.creationTimestamp || true
+
+    exit 1
+fi
 
 echo "Deploying backend"
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/backend-deployment.yaml
 
-sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
-    deployment/pactum-backend --timeout=300s
+if ! sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
+    deployment/pactum-backend --timeout=300s; then
+
+    echo "Backend rollout failed or timed out."
+
+    sudo /usr/local/bin/k3s kubectl describe \
+        deployment/pactum-backend -n pactum || true
+
+    sudo /usr/local/bin/k3s kubectl get pods \
+        -n pactum -o wide || true
+
+    sudo /usr/local/bin/k3s kubectl logs \
+        -n pactum -l app=pactum-backend \
+        --all-containers=true --prefix=true --tail=100 || true
+
+    sudo /usr/local/bin/k3s kubectl get events \
+        -n pactum --sort-by=.metadata.creationTimestamp || true
+
+    exit 1
+fi
 
 echo "Final pod status"
 sudo /usr/local/bin/k3s kubectl -n pactum get pods -o wide
@@ -457,7 +535,7 @@ sudo /usr/local/bin/k3s kubectl -n pactum get service
 echo "Remote deployment completed"
 '@
 
-                        # Insert only controlled values into the literal script.
+                        # Insert controlled values into the literal remote script.
                         $remoteScript = $remoteScript.Replace(
                             '__REPO__', $repo
                         ).Replace(
@@ -468,6 +546,8 @@ echo "Remote deployment completed"
                             '__DB_B64__', $dbB64
                         ).Replace(
                             '__DJANGO_B64__', $djangoB64
+                        ).Replace(
+                            '__GITHUB_TOKEN_B64__', $githubTokenB64
                         )
 
                         $inputObject = @{
@@ -486,26 +566,43 @@ echo "Remote deployment completed"
                         )
 
                         try {
-                            $inputObject |
-                                ConvertTo-Json -Depth 8 |
-                                Set-Content -Path $inputPath -Encoding utf8
+                            $json = $inputObject |
+                                ConvertTo-Json -Depth 8 -Compress
 
-                            $commandId = & aws ssm send-command `
+                            [System.IO.File]::WriteAllText(
+                                $inputPath,
+                                $json,
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
+                            $awsOutput = & aws ssm send-command `
                                 --region $env:AWS_REGION `
                                 --cli-input-json "file://$inputPath" `
                                 --query 'Command.CommandId' `
                                 --output text 2>&1
 
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "SSM deployment submission failed: $commandId"
+                            $awsExitCode = $LASTEXITCODE
+
+                            if ($awsExitCode -ne 0) {
+                                $awsOutput | ForEach-Object {
+                                    Write-Host "$_"
+                                }
+                                throw "AWS SSM send-command failed with exit code $awsExitCode"
                             }
+
+                            $commandId = "$awsOutput".Trim()
+
+                            if (-not $commandId -or $commandId -eq 'None') {
+                                throw "AWS SSM returned no command ID. Output: $awsOutput"
+                            }
+
+                            Write-Host "SSM command submitted: $commandId"
                         }
                         finally {
                             Remove-Item $inputPath -Force `
                                 -ErrorAction SilentlyContinue
                         }
 
-                        $commandId = "$commandId".Trim()
                         $finished = $false
 
                         for ($i = 0; $i -lt 180; $i++) {
