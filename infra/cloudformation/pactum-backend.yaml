@@ -3,9 +3,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Pactum Django backend on EC2 with k3s and ALB, using Supabase PostgreSQL.
 
 Parameters:
-  LatestAmiId:
+  UbuntuAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
 
   InstanceType:
     Type: String
@@ -182,7 +182,7 @@ Resources:
       - PublicRoute
       - AttachInternetGateway
     Properties:
-      ImageId: !Ref LatestAmiId
+      ImageId: !Ref UbuntuAmiId
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref BackendInstanceProfile
       SubnetId: !Ref PublicSubnetA
@@ -204,25 +204,30 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          set -euo pipefail
+          set -euxo pipefail
 
-          dnf install -y curl
-          command -v aws >/dev/null 2>&1 || dnf install -y awscli-2
-          systemctl enable --now amazon-ssm-agent
+          exec > >(tee -a /var/log/pactum-bootstrap.log) 2>&1
 
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+          apt-get install -y curl ca-certificates git
+
+          # Install k3s
           curl -sfL https://get.k3s.io | \
-            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 600" sh -
+            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
 
           systemctl enable --now k3s
 
+          # Verify Kubernetes is ready
           for i in $(seq 1 60); do
-            if /usr/local/bin/kubectl get nodes >/dev/null 2>&1; then
+            if /usr/local/bin/k3s kubectl get nodes >/dev/null 2>&1; then
               break
             fi
-            sleep 10
+            sleep 5
           done
 
-          /usr/local/bin/kubectl get nodes
+          /usr/local/bin/k3s kubectl get nodes
 
 Outputs:
   InstanceId:
