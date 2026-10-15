@@ -116,6 +116,8 @@ pipeline {
                             throw 'Docker Hub login failed.'
                         }
 
+                        $image = "${user}/pactum-backend:$($env:IMAGE_TAG)"
+
                         try {
                             docker build -t $image backend
                             if ($LASTEXITCODE -ne 0) {
