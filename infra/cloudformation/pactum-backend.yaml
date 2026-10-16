@@ -241,3 +241,7 @@ Outputs:
   BackendApiUrl:
     Description: Temporary HTTP API URL; configure HTTPS before production use
     Value: !Sub "http://${Alb.DNSName}"
+
+  InstancePrivateIp:
+    Description: Private IP of the current backend EC2 instance
+    Value: !GetAtt BackendInstance.PrivateIp

@@ -180,12 +180,15 @@ pipeline {
                                     $outputs[$item.OutputKey] = $item.OutputValue
                                 }
 
-                                if (-not $outputs.InstanceId -or -not $outputs.LoadBalancerDNS) {
-                                    throw 'Required outputs InstanceId or LoadBalancerDNS are missing.'
+                                if (-not $outputs.InstanceId -or
+                                    -not $outputs.LoadBalancerDNS -or
+                                    -not $outputs.InstancePrivateIp) {
+                                    throw 'Required outputs InstanceId, LoadBalancerDNS, or InstancePrivateIp are missing.'
                                 }
 
                                 Write-Output "INSTANCE_ID=$($outputs.InstanceId)"
                                 Write-Output "ALB_DNS=$($outputs.LoadBalancerDNS)"
+                                Write-Output "INSTANCE_PRIVATE_IP=$($outputs.InstancePrivateIp)"
                             '''
                         ).trim()
 
@@ -196,12 +199,17 @@ pipeline {
                             it.startsWith('ALB_DNS=')
                         }
 
-                        if (!instanceLine || !albLine) {
+                        def privateIpLine = result.readLines().find {
+                            it.startsWith('INSTANCE_PRIVATE_IP=')
+                        }
+
+                        if (!instanceLine || !albLine || !privateIpLine) {
                             error("Could not parse CloudFormation outputs. Output: ${result}")
                         }
 
                         env.PACTUM_INSTANCE_ID = instanceLine.substring('INSTANCE_ID='.length())
                         env.PACTUM_ALB_DNS = albLine.substring('ALB_DNS='.length())
+                        env.PACTUM_PRIVATE_IP = privateIpLine.substring('INSTANCE_PRIVATE_IP='.length())
 
                         echo "EC2 instance: ${env.PACTUM_INSTANCE_ID}"
                         echo "Load balancer: http://${env.PACTUM_ALB_DNS}"
@@ -433,6 +441,8 @@ git rev-parse HEAD
 unset GITHUB_TOKEN GITHUB_TOKEN_B64 AUTH_HEADER
 
 IMAGE='__IMAGE__'
+ALB_DNS='__ALB_DNS__'
+INSTANCE_PRIVATE_IP='__INSTANCE_PRIVATE_IP__'
 DB_PASSWORD_B64='__DB_B64__'
 DJANGO_SECRET_KEY_B64='__DJANGO_B64__'
 
@@ -465,6 +475,11 @@ grep -q 'BACKEND_IMAGE_PLACEHOLDER' \
 sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
     deploy/kubernetes/backend-deployment.yaml \
     deploy/kubernetes/django-migration-job.yaml
+
+ALLOWED_HOSTS="$ALB_DNS,$INSTANCE_PRIVATE_IP,localhost,127.0.0.1"
+
+sed -i "s|ALLOWED_HOSTS_PLACEHOLDER|$ALLOWED_HOSTS|g" \
+    deploy/kubernetes/backend-deployment.yaml
 
 echo "Applying backend service"
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
@@ -548,6 +563,10 @@ echo "Remote deployment completed"
                             '__DJANGO_B64__', $djangoB64
                         ).Replace(
                             '__GITHUB_TOKEN_B64__', $githubTokenB64
+                        ).Replace(
+                            '__ALB_DNS__', $env:PACTUM_ALB_DNS
+                        ).Replace(
+                            '__INSTANCE_PRIVATE_IP__', $env:PACTUM_PRIVATE_IP
                         )
 
                         $inputObject = @{
