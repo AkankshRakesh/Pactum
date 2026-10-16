@@ -127,11 +127,13 @@ Resources:
       Targets:
         - Id: !Ref BackendInstance
           Port: 30080
+        - Id: !Ref BackendInstance2
+          Port: 30080
       HealthCheckEnabled: true
       HealthCheckProtocol: HTTP
-      HealthCheckPath: /
+      HealthCheckPath: /health/
       Matcher:
-        HttpCode: "200-499"
+        HttpCode: "200"
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       HealthCheckIntervalSeconds: 20
@@ -229,10 +231,72 @@ Resources:
 
           /usr/local/bin/k3s kubectl get nodes
 
+  BackendInstance2:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - PublicRoute
+      - AttachInternetGateway
+    Properties:
+      ImageId: !Ref UbuntuAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref BackendInstanceProfile
+      SubnetId: !Ref PublicSubnetB
+      SecurityGroupIds:
+        - !Ref BackendSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      KeyName: kin
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-backend-2"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          exec > >(tee -a /var/log/pactum-bootstrap.log) 2>&1
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+          apt-get install -y curl ca-certificates git
+
+          curl -sfL https://get.k3s.io | \
+            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
+
+          systemctl enable --now k3s
+
+          for i in $(seq 1 60); do
+            if /usr/local/bin/k3s kubectl get nodes >/dev/null 2>&1; then
+              break
+            fi
+            sleep 5
+          done
+
+          /usr/local/bin/k3s kubectl get nodes
+
 Outputs:
   InstanceId:
-    Description: EC2 instance running k3s
+    Description: First backend EC2 instance ID
     Value: !Ref BackendInstance
+
+  InstanceId2:
+    Description: Second backend EC2 instance ID
+    Value: !Ref BackendInstance2
+
+  InstanceIds:
+    Description: Comma-separated backend EC2 instance IDs
+    Value: !Join
+      - ","
+      - - !Ref BackendInstance
+        - !Ref BackendInstance2
 
   LoadBalancerDNS:
     Description: ALB DNS name for the backend API
@@ -243,5 +307,16 @@ Outputs:
     Value: !Sub "http://${Alb.DNSName}"
 
   InstancePrivateIp:
-    Description: Private IP of the current backend EC2 instance
+    Description: First backend EC2 private IP
     Value: !GetAtt BackendInstance.PrivateIp
+
+  InstancePrivateIp2:
+    Description: Second backend EC2 private IP
+    Value: !GetAtt BackendInstance2.PrivateIp
+
+  InstancePrivateIps:
+    Description: Comma-separated backend private IP addresses
+    Value: !Join
+      - ","
+      - - !GetAtt BackendInstance.PrivateIp
+        - !GetAtt BackendInstance2.PrivateIp

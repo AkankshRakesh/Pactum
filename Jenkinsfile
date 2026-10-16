@@ -171,40 +171,41 @@ pipeline {
                                     $outputs[$item.OutputKey] = $item.OutputValue
                                 }
 
-                                if (-not $outputs.InstanceId -or
+                                if (-not $outputs.InstanceIds -or
                                     -not $outputs.LoadBalancerDNS -or
-                                    -not $outputs.InstancePrivateIp) {
-                                    throw 'Missing InstanceId, LoadBalancerDNS, or InstancePrivateIp CloudFormation output.'
+                                    -not $outputs.InstancePrivateIps) {
+                                    throw 'Missing InstanceIds, LoadBalancerDNS, or InstancePrivateIps CloudFormation output.'
                                 }
 
-                                Write-Output "INSTANCE_ID=$($outputs.InstanceId)"
+                                Write-Output "INSTANCE_IDS=$($outputs.InstanceIds)"
                                 Write-Output "ALB_DNS=$($outputs.LoadBalancerDNS)"
-                                Write-Output "INSTANCE_PRIVATE_IP=$($outputs.InstancePrivateIp)"
+                                Write-Output "INSTANCE_PRIVATE_IPS=$($outputs.InstancePrivateIps)"
                             '''
                         ).trim()
 
-                        def instanceLine = result.readLines().find {
-                            it.startsWith('INSTANCE_ID=')
+                        def instanceIdsLine = result.readLines().find {
+                            it.startsWith('INSTANCE_IDS=')
                         }
                         def albLine = result.readLines().find {
                             it.startsWith('ALB_DNS=')
                         }
-                        def ipLine = result.readLines().find {
-                            it.startsWith('INSTANCE_PRIVATE_IP=')
+                        def privateIpsLine = result.readLines().find {
+                            it.startsWith('INSTANCE_PRIVATE_IPS=')
                         }
 
-                        if (!instanceLine || !albLine || !ipLine) {
+                        if (!instanceIdsLine || !albLine || !privateIpsLine) {
                             error("Could not parse CloudFormation outputs: ${result}")
                         }
 
-                        env.PACTUM_INSTANCE_ID =
-                            instanceLine.substring('INSTANCE_ID='.length())
+                        env.PACTUM_INSTANCE_IDS =
+                            instanceIdsLine.substring('INSTANCE_IDS='.length())
                         env.PACTUM_ALB_DNS =
                             albLine.substring('ALB_DNS='.length())
-                        env.PACTUM_PRIVATE_IP =
-                            ipLine.substring('INSTANCE_PRIVATE_IP='.length())
+                        env.PACTUM_PRIVATE_IPS =
+                            privateIpsLine.substring('INSTANCE_PRIVATE_IPS='.length())
 
-                        echo "EC2 instance: ${env.PACTUM_INSTANCE_ID}"
+                        echo "EC2 instances: ${env.PACTUM_INSTANCE_IDS}"
+                        echo "Private IPs: ${env.PACTUM_PRIVATE_IPS}"
                         echo "ALB: http://${env.PACTUM_ALB_DNS}"
                     }
                 }
@@ -222,93 +223,104 @@ pipeline {
                 ]) {
                     powershell '''
                         $ErrorActionPreference = 'Stop'
-                        $online = $false
+                        $instanceIds = $env:PACTUM_INSTANCE_IDS.Split(',')
 
-                        for ($i = 0; $i -lt 60; $i++) {
-                            $status = & aws ssm describe-instance-information `
-                                --region $env:AWS_REGION `
-                                --filters "Key=InstanceIds,Values=$env:PACTUM_INSTANCE_ID" `
-                                --query "InstanceInformationList[0].PingStatus" `
-                                --output text 2>&1
+                        foreach ($instanceId in $instanceIds) {
+                            $instanceId = $instanceId.Trim()
+                            Write-Host "Waiting for SSM: $instanceId"
 
-                            if ($LASTEXITCODE -eq 0 -and
-                                "$status".Trim() -eq 'Online') {
-                                $online = $true
-                                break
+                            $online = $false
+                            for ($i = 0; $i -lt 60; $i++) {
+                                $status = & aws ssm describe-instance-information `
+                                    --region $env:AWS_REGION `
+                                    --filters "Key=InstanceIds,Values=$instanceId" `
+                                    --query "InstanceInformationList[0].PingStatus" `
+                                    --output text 2>&1
+
+                                if ($LASTEXITCODE -eq 0 -and
+                                    "$status".Trim() -eq 'Online') {
+                                    $online = $true
+                                    break
+                                }
+
+                                Start-Sleep -Seconds 10
                             }
 
-                            Start-Sleep -Seconds 10
-                        }
-
-                        if (-not $online) {
-                            throw 'EC2 did not become available in SSM.'
-                        }
-
-                        $commands = @(
-                            'sudo /usr/local/bin/k3s kubectl get nodes',
-                            'sudo systemctl is-active k3s'
-                        )
-
-                        $payload = @{
-                            InstanceIds = @($env:PACTUM_INSTANCE_ID)
-                            DocumentName = 'AWS-RunShellScript'
-                            Parameters = @{ commands = $commands }
-                            TimeoutSeconds = 120
-                        }
-
-                        $path = Join-Path $env:TEMP (
-                            'pactum-check-' + [guid]::NewGuid().ToString('N') + '.json'
-                        )
-
-                        try {
-                            $payload | ConvertTo-Json -Depth 8 |
-                                Set-Content -Path $path -Encoding ascii
-
-                            $commandId = & aws ssm send-command `
-                                --region $env:AWS_REGION `
-                                --cli-input-json "file://$path" `
-                                --query 'Command.CommandId' `
-                                --output text
-
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Could not run SSM readiness check.'
-                            }
-                        }
-                        finally {
-                            Remove-Item $path -Force -ErrorAction SilentlyContinue
-                        }
-
-                        $complete = $false
-                        for ($i = 0; $i -lt 30; $i++) {
-                            Start-Sleep -Seconds 5
-                            $status = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $env:PACTUM_INSTANCE_ID `
-                                --query Status --output text 2>&1
-
-                            if ("$status".Trim() -eq 'Success') {
-                                $complete = $true
-                                break
+                            if (-not $online) {
+                                throw "Instance $instanceId did not become available in SSM."
                             }
 
-                            if ("$status".Trim() -in @(
-                                'Failed', 'Cancelled', 'TimedOut'
-                            )) {
-                                break
+                            $commands = @(
+                                'sudo /usr/local/bin/k3s kubectl get nodes',
+                                'sudo systemctl is-active k3s'
+                            )
+
+                            $payload = @{
+                                InstanceIds = @($instanceId)
+                                DocumentName = 'AWS-RunShellScript'
+                                Parameters = @{ commands = $commands }
+                                TimeoutSeconds = 120
                             }
-                        }
 
-                        if (-not $complete) {
-                            $details = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $env:PACTUM_INSTANCE_ID `
-                                --query StandardErrorContent --output text
-                            throw "SSM/k3s readiness check failed: $details"
-                        }
+                            $path = Join-Path $env:TEMP (
+                                'pactum-check-' +
+                                [guid]::NewGuid().ToString('N') + '.json'
+                            )
 
-                        Write-Host 'SSM and k3s are ready.'
+                            try {
+                                [IO.File]::WriteAllText(
+                                    $path,
+                                    ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                    [System.Text.UTF8Encoding]::new($false)
+                                )
+
+                                $commandId = & aws ssm send-command `
+                                    --region $env:AWS_REGION `
+                                    --cli-input-json "file://$path" `
+                                    --query 'Command.CommandId' `
+                                    --output text
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Could not run k3s check on $instanceId."
+                                }
+                            }
+                            finally {
+                                Remove-Item $path -Force -ErrorAction SilentlyContinue
+                            }
+
+                            $complete = $false
+                            for ($i = 0; $i -lt 30; $i++) {
+                                Start-Sleep -Seconds 5
+
+                                $status = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query Status --output text 2>&1
+
+                                if ("$status".Trim() -eq 'Success') {
+                                    $complete = $true
+                                    break
+                                }
+
+                                if ("$status".Trim() -in @(
+                                    'Failed', 'Cancelled', 'TimedOut'
+                                )) {
+                                    break
+                                }
+                            }
+
+                            if (-not $complete) {
+                                $details = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query StandardErrorContent --output text
+                                throw "k3s readiness check failed on ${instanceId}: $details"
+                            }
+
+                            Write-Host "SSM and k3s ready on $instanceId"
+                        }
                     '''
                 }
             }
@@ -346,18 +358,6 @@ pipeline {
                     string(
                         credentialsId: 'github-pactum-token',
                         variable: 'GITHUB_TOKEN'
-                    ),
-                    string(
-                        credentialsId: 'pactum-google-client-id',
-                        variable: 'GOOGLE_CLIENT_ID_CREDENTIAL'
-                    ),
-                    string(
-                        credentialsId: 'pactum-google-client-secret',
-                        variable: 'GOOGLE_CLIENT_SECRET_CREDENTIAL'
-                    ),
-                    string(
-                        credentialsId: 'pactum-google-redirect-uri',
-                        variable: 'GOOGLE_REDIRECT_URI_CREDENTIAL'
                     )
                 ]) {
                     powershell '''
@@ -374,30 +374,6 @@ pipeline {
                                 throw "Required credential is empty: $name"
                             }
                         }
-
-                        if (-not $env:GOOGLE_CLIENT_ID_CREDENTIAL -or
-                            -not $env:GOOGLE_CLIENT_SECRET_CREDENTIAL -or
-                            -not $env:GOOGLE_REDIRECT_URI_CREDENTIAL) {
-                            throw 'Google OAuth credentials are missing.'
-                        }
-
-                        $googleClientIdB64 = [Convert]::ToBase64String(
-                            [Text.Encoding]::UTF8.GetBytes(
-                                $env:GOOGLE_CLIENT_ID_CREDENTIAL.Trim()
-                            )
-                        )
-
-                        $googleClientSecretB64 = [Convert]::ToBase64String(
-                            [Text.Encoding]::UTF8.GetBytes(
-                                $env:GOOGLE_CLIENT_SECRET_CREDENTIAL.Trim()
-                            )
-                        )
-
-                        $googleRedirectUriB64 = [Convert]::ToBase64String(
-                            [Text.Encoding]::UTF8.GetBytes(
-                                $env:GOOGLE_REDIRECT_URI_CREDENTIAL.Trim()
-                            )
-                        )
 
                         $dbB64 = [Convert]::ToBase64String(
                             [Text.Encoding]::UTF8.GetBytes($env:SUPABASE_DB_PASSWORD)
@@ -449,18 +425,13 @@ unset GITHUB_TOKEN GITHUB_TOKEN_B64 AUTH_HEADER
 
 IMAGE='__IMAGE__'
 ALB_DNS='__ALB_DNS__'
-INSTANCE_PRIVATE_IP='__INSTANCE_PRIVATE_IP__'
+INSTANCE_PRIVATE_IPS='__INSTANCE_PRIVATE_IPS__'
+RUN_MIGRATIONS='__RUN_MIGRATIONS__'
 DB_PASSWORD_B64='__DB_B64__'
 DJANGO_SECRET_KEY_B64='__DJANGO_B64__'
 SMTP_USER_B64='__SMTP_USER_B64__'
 SMTP_PASSWORD_B64='__SMTP_PASSWORD_B64__'
-GOOGLE_CLIENT_ID_B64='__GOOGLE_CLIENT_ID_B64__'
-GOOGLE_CLIENT_SECRET_B64='__GOOGLE_CLIENT_SECRET_B64__'
-GOOGLE_REDIRECT_URI_B64='__GOOGLE_REDIRECT_URI_B64__'
 
-GOOGLE_CLIENT_ID="$(printf '%s' "$GOOGLE_CLIENT_ID_B64" | base64 -d)"
-GOOGLE_CLIENT_SECRET="$(printf '%s' "$GOOGLE_CLIENT_SECRET_B64" | base64 -d)"
-GOOGLE_REDIRECT_URI="$(printf '%s' "$GOOGLE_REDIRECT_URI_B64" | base64 -d)"
 DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
 DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
 SMTP_USER="$(printf '%s' "$SMTP_USER_B64" | base64 -d)"
@@ -482,17 +453,6 @@ sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-smtp-secr
     --dry-run=client -o yaml |
     sudo /usr/local/bin/k3s kubectl apply -f -
 
-sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-google-oauth-secrets \
-    --from-literal=GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
-    --from-literal=GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
-    --from-literal=GOOGLE_REDIRECT_URI="$GOOGLE_REDIRECT_URI" \
-    --dry-run=client -o yaml |
-    sudo /usr/local/bin/k3s kubectl apply -f -
-
-
-unset GOOGLE_CLIENT_ID GOOGLE_CLIENT_ID_B64
-unset GOOGLE_CLIENT_SECRET GOOGLE_CLIENT_SECRET_B64
-unset GOOGLE_REDIRECT_URI GOOGLE_REDIRECT_URI_B64
 unset DB_PASSWORD DB_PASSWORD_B64
 unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 unset SMTP_PASSWORD SMTP_PASSWORD_B64
@@ -504,7 +464,7 @@ sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
     deploy/kubernetes/backend-deployment.yaml \
     deploy/kubernetes/django-migration-job.yaml
 
-ALLOWED_HOSTS="$ALB_DNS,$INSTANCE_PRIVATE_IP,localhost,127.0.0.1"
+ALLOWED_HOSTS="$ALB_DNS,$INSTANCE_PRIVATE_IPS,localhost,127.0.0.1"
 grep -q 'ALLOWED_HOSTS_PLACEHOLDER' deploy/kubernetes/backend-deployment.yaml
 sed -i "s|ALLOWED_HOSTS_PLACEHOLDER|$ALLOWED_HOSTS|g" \
     deploy/kubernetes/backend-deployment.yaml
@@ -512,24 +472,26 @@ sed -i "s|ALLOWED_HOSTS_PLACEHOLDER|$ALLOWED_HOSTS|g" \
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
     -f deploy/kubernetes/backend-service.yaml
 
-sudo /usr/local/bin/k3s kubectl -n pactum delete job \
-    pactum-migrate --ignore-not-found=true
+if [ "$RUN_MIGRATIONS" = "true" ]; then
+    sudo /usr/local/bin/k3s kubectl -n pactum delete job \
+        pactum-migrate --ignore-not-found=true
 
-sudo /usr/local/bin/k3s kubectl apply -n pactum \
-    -f deploy/kubernetes/django-migration-job.yaml
+    sudo /usr/local/bin/k3s kubectl apply -n pactum \
+        -f deploy/kubernetes/django-migration-job.yaml
 
-if ! sudo /usr/local/bin/k3s kubectl wait \
-    --namespace pactum \
-    --for=condition=complete \
-    job/pactum-migrate --timeout=600s; then
+    if ! sudo /usr/local/bin/k3s kubectl wait \
+        --namespace pactum \
+        --for=condition=complete \
+        job/pactum-migrate --timeout=600s; then
 
-    sudo /usr/local/bin/k3s kubectl describe job/pactum-migrate -n pactum || true
-    sudo /usr/local/bin/k3s kubectl get pods -n pactum -o wide || true
-    sudo /usr/local/bin/k3s kubectl logs -n pactum job/pactum-migrate \
-        --all-containers=true || true
-    sudo /usr/local/bin/k3s kubectl get events -n pactum \
-        --sort-by=.metadata.creationTimestamp || true
-    exit 1
+        sudo /usr/local/bin/k3s kubectl describe job/pactum-migrate -n pactum || true
+        sudo /usr/local/bin/k3s kubectl get pods -n pactum -o wide || true
+        sudo /usr/local/bin/k3s kubectl logs -n pactum job/pactum-migrate \
+            --all-containers=true || true
+        sudo /usr/local/bin/k3s kubectl get events -n pactum \
+            --sort-by=.metadata.creationTimestamp || true
+        exit 1
+    fi
 fi
 
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
@@ -587,90 +549,126 @@ echo "Remote deployment completed"
                         ).Replace(
                             '__ALB_DNS__', $env:PACTUM_ALB_DNS
                         ).Replace(
-                            '__INSTANCE_PRIVATE_IP__', $env:PACTUM_PRIVATE_IP
+                            '__INSTANCE_PRIVATE_IPS__', $env:PACTUM_PRIVATE_IPS
                         )
 
-                        $payload = @{
-                            InstanceIds = @($env:PACTUM_INSTANCE_ID)
-                            DocumentName = 'AWS-RunShellScript'
-                            Comment = "Deploy Pactum backend $env:IMAGE_TAG"
-                            Parameters = @{ commands = @($remoteScript) }
-                            TimeoutSeconds = 900
+                        $instanceIds = @(
+                            $env:PACTUM_INSTANCE_IDS.Split(',') |
+                            ForEach-Object { $_.Trim() } |
+                            Where-Object { $_ }
+                        )
+
+                        if ($instanceIds.Count -ne 2) {
+                            throw "Expected 2 EC2 instances, received $($instanceIds.Count)."
                         }
 
-                        $inputPath = Join-Path $env:TEMP (
-                            'pactum-deploy-' + [guid]::NewGuid().ToString('N') + '.json'
-                        )
+                        for ($index = 0; $index -lt $instanceIds.Count; $index++) {
+                            $instanceId = $instanceIds[$index]
 
-                        try {
-                            [IO.File]::WriteAllText(
-                                $inputPath,
-                                ($payload | ConvertTo-Json -Depth 8 -Compress),
-                                [System.Text.UTF8Encoding]::new($false)
+                            # Shared Supabase database: run migrations only once.
+                            $runMigrations = if ($index -eq 0) { 'true' } else { 'false' }
+
+                            $scriptForInstance = $remoteScript.Replace(
+                                '__RUN_MIGRATIONS__', $runMigrations
                             )
 
-                            $commandId = & aws ssm send-command `
-                                --region $env:AWS_REGION `
-                                --cli-input-json "file://$inputPath" `
-                                --query 'Command.CommandId' `
-                                --output text
+                            Write-Host "Deploying to $instanceId (migrations: $runMigrations)"
 
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'SSM deployment command submission failed.'
+                            $payload = @{
+                                InstanceIds = @($instanceId)
+                                DocumentName = 'AWS-RunShellScript'
+                                Comment = "Deploy Pactum backend $env:IMAGE_TAG"
+                                Parameters = @{
+                                    commands = @($scriptForInstance)
+                                }
+                                TimeoutSeconds = 900
                             }
-                        }
-                        finally {
-                            Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
-                        }
 
-                        $commandId = "$commandId".Trim()
-                        $finished = $false
+                            $inputPath = Join-Path $env:TEMP (
+                                'pactum-deploy-' + [guid]::NewGuid().ToString('N') + '.json'
+                            )
 
-                        for ($i = 0; $i -lt 180; $i++) {
-                            Start-Sleep -Seconds 5
+                            try {
+                                [IO.File]::WriteAllText(
+                                    $inputPath,
+                                    ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                    [System.Text.UTF8Encoding]::new($false)
+                                )
 
-                            $status = & aws ssm get-command-invocation `
+                                $commandId = & aws ssm send-command `
+                                    --region $env:AWS_REGION `
+                                    --cli-input-json "file://$inputPath" `
+                                    --query 'Command.CommandId' `
+                                    --output text
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "SSM command submission failed for $instanceId."
+                                }
+                            }
+                            finally {
+                                Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
+                            }
+
+                            $commandId = "$commandId".Trim()
+                            $finished = $false
+
+                            for ($attempt = 0; $attempt -lt 180; $attempt++) {
+                                Start-Sleep -Seconds 5
+
+                                $status = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query Status `
+                                    --output text 2>&1
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    continue
+                                }
+
+                                $status = "$status".Trim()
+
+                                if ($status -eq 'Success') {
+                                    $finished = $true
+                                    break
+                                }
+
+                                if ($status -in @(
+                                    'Failed',
+                                    'Cancelled',
+                                    'TimedOut',
+                                    'Cancelling'
+                                )) {
+                                    break
+                                }
+                            }
+
+                            $stdout = & aws ssm get-command-invocation `
                                 --region $env:AWS_REGION `
                                 --command-id $commandId `
-                                --instance-id $env:PACTUM_INSTANCE_ID `
-                                --query Status --output text 2>&1
+                                --instance-id $instanceId `
+                                --query StandardOutputContent `
+                                --output text 2>&1
 
-                            if ($LASTEXITCODE -ne 0) {
-                                continue
+                            if ($stdout) {
+                                Write-Host $stdout
                             }
 
-                            $status = "$status".Trim()
+                            if (-not $finished) {
+                                $stderr = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query StandardErrorContent `
+                                    --output text 2>&1
 
-                            if ($status -eq 'Success') {
-                                $finished = $true
-                                break
+                                throw "Deployment failed on ${instanceId}: $stderr"
                             }
 
-                            if ($status -in @('Failed', 'Cancelled', 'TimedOut')) {
-                                break
-                            }
+                            Write-Host "Deployment succeeded on $instanceId"
                         }
 
-                        $stdout = & aws ssm get-command-invocation `
-                            --region $env:AWS_REGION `
-                            --command-id $commandId `
-                            --instance-id $env:PACTUM_INSTANCE_ID `
-                            --query StandardOutputContent --output text 2>&1
-
-                        if ($stdout) {
-                            Write-Host $stdout
-                        }
-
-                        if (-not $finished) {
-                            $stderr = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $env:PACTUM_INSTANCE_ID `
-                                --query StandardErrorContent --output text 2>&1
-                            throw "Remote deployment failed: $stderr"
-                        }
-
-                        Write-Host "Deployment succeeded for $image"
+                        Write-Host "Both EC2 instances deployed successfully."
                         Write-Host "Backend: http://$env:PACTUM_ALB_DNS"
                     '''
                 }

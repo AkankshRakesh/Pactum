@@ -26,6 +26,12 @@ from html.parser import HTMLParser
 from .models import Contract, ContractComment, ContractInvitation
 
 
+@require_GET
+def health(request):
+    """Return a lightweight liveness response for load balancer checks."""
+    return JsonResponse({"status": "ok"})
+
+
 CLAUSES = [
     {
         "num": "1.1",  

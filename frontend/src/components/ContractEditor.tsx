@@ -15,6 +15,13 @@ type ContractComment = { id: number; clauseId?: string; clauseIndex?: number | n
 type ContractRecord = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: ContractComment[] };
 type Format = "bold" | "italic" | "underline" | "insertUnorderedList";
 
+function sortCommentsLatestFirst(comments: ContractComment[]) {
+  return [...comments].sort((left, right) => {
+    const timeDifference = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    return timeDifference || right.id - left.id;
+  });
+}
+
 const styles = {
   workspace: "min-h-screen bg-[#f3eee8] pactum-body text-[#1a0f10] dark:bg-[#0f0708] dark:text-[#f0e8e8]",
   appBar: "sticky top-0 z-10 flex min-h-14 items-center justify-between gap-4 border-b border-black/10 bg-[#faf6f2] px-6 dark:border-white/10 dark:bg-[#160b0c]",
@@ -97,6 +104,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   const skipNextEmptyRemoval = useRef(false);
   const serverSaveTimer = useRef<number | null>(null);
   const pendingDeletedComments = useRef<ContractComment[]>([]);
+  const localChangesRef = useRef(false);
   const [panelOpen, setPanelOpen] = useState(false);              // bottom sheet / slide-over
   const [activeClause, setActiveClause] = useState<number | null>(null); // clause popover (index)
   const [clauseIds, setClauseIds] = useState<string[]>([]);       // data-clause-id per <li>, by index
@@ -152,9 +160,10 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           setInvitedEmail(contract.invitedEmail || "");
           setInvitationStatus(contract.invitationStatus || "");
           setContractStatus(contract.status);
-          setComments(contract.comments || []);
+          setComments(sortCommentsLatestFirst(contract.comments || []));
           setBodyToHydrate(contract.bodyHtml);
           setSavedState("Saved to Pactum");
+          localChangesRef.current = false;
         } else {
           const template = getTemplate(new URLSearchParams(window.location.search).get("template"));
           if (template) {
@@ -173,6 +182,38 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
 
     return () => controller.abort();
   }, [router, routeContractId]);
+
+  useEffect(() => {
+    if (!contractId) return;
+    const controller = new AbortController();
+
+    async function refreshContract() {
+      try {
+        const response = await fetch(`${API_BASE}/api/contracts/${contractId}/`, { credentials: "include", signal: controller.signal });
+        if (!response.ok) return;
+        const result = await response.json();
+        const contract = result.contract as ContractRecord;
+        setComments(sortCommentsLatestFirst(contract.comments || []));
+        setInvitedEmail(contract.invitedEmail || "");
+        setInvitationStatus(contract.invitationStatus || "");
+        setContractStatus(contract.status);
+
+        // Do not replace the document while the user has local changes in flight.
+        if (!localChangesRef.current) {
+          setTitle(contract.title);
+          if (editorRef.current?.innerHTML !== contract.bodyHtml) setBodyToHydrate(contract.bodyHtml);
+        }
+      } catch {
+        // Polling is best-effort; keep the current editor usable on transient failures.
+      }
+    }
+
+    const interval = window.setInterval(() => void refreshContract(), 5000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [contractId]);
 
   useEffect(() => {
     if (bodyToHydrate === undefined || !editorRef.current) return;
@@ -204,6 +245,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
   }
 
   function updateDocument() {
+    localChangesRef.current = true;
     setSavedState("Saving to Pactum...");
     queueServerSave();
     window.requestAnimationFrame(measureClausePositions);
@@ -226,7 +268,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     pendingDeletedComments.current = [];
     setComments(current => {
       const existing = new Set(current.map(comment => comment.id));
-      return [...current, ...restored.filter(comment => !existing.has(comment.id))].sort((left, right) => left.id - right.id);
+      return sortCommentsLatestFirst([...current, ...restored.filter(comment => !existing.has(comment.id))]);
     });
   }
 
@@ -253,7 +295,8 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     const contract = result.contract as ContractRecord;
     setContractId(contract.id);
     setContractStatus(contract.status);
-    setComments(contract.comments || []);
+    setComments(sortCommentsLatestFirst(contract.comments || []));
+    localChangesRef.current = false;
     pendingDeletedComments.current = [];
     window.requestAnimationFrame(measureClausePositions);
     window.history.replaceState({}, "", `/contract/${contract.id}`);
@@ -482,7 +525,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
     const response = await fetch(`${API_BASE}/api/contracts/${contractId}/comments/`, { credentials: "include" });
     const result = await response.json();
     // console.log("refreshComments result:", result.comments);
-    if (response.ok) setComments(result.comments || []);
+    if (response.ok) setComments(sortCommentsLatestFirst(result.comments || []));
   }
 
 
@@ -558,7 +601,7 @@ export default function ContractEditor({ contractId: routeContractId }: { contra
           
         </div>
         <div className={styles.documentName}>
-            <input className={styles.documentTitleInput} disabled={contractStatus === "executed"} value={title} onChange={event => { const nextTitle = event.target.value; setTitle(nextTitle); setSavedState("Saving to Pactum..."); queueServerSave(nextTitle); }} aria-label="Contract title" />
+            <input className={styles.documentTitleInput} disabled={contractStatus === "executed"} value={title} onChange={event => { const nextTitle = event.target.value; localChangesRef.current = true; setTitle(nextTitle); setSavedState("Saving to Pactum..."); queueServerSave(nextTitle); }} aria-label="Contract title" />
           <span className={styles.saveStatus}>{savedState}</span>
         </div>
         <div className={styles.appActions}>

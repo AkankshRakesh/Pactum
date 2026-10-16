@@ -12,6 +12,13 @@ type Comment = { id: number; clauseId?: string; clauseIndex?: number | null; quo
 type Contract = { id: string; title: string; subtitle: string; bodyHtml: string; status: string; invitedEmail?: string; invitationStatus?: string; comments?: Comment[] };
 type ClauseBox = { id: string; top: number; height: number };
 
+function sortCommentsLatestFirst(comments: Comment[]) {
+  return [...comments].sort((left, right) => {
+    const timeDifference = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    return timeDifference || right.id - left.id;
+  });
+}
+
 async function readResponse(response: Response) {
   const text = await response.text();
   if (!text) return {} as Record<string, unknown>;
@@ -92,20 +99,28 @@ export default function ContractReview({ contractId }: { contractId: string }) {
   // ── load ──────────────────────────────────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
-    (async () => {
+    async function loadContract(showLoading = false) {
       try {
+        if (showLoading) setLoading(true);
         const response = await fetch(`${API_BASE}/api/contracts/${contractId}/review/`, { credentials: "include", signal: controller.signal });
         const result = await readResponse(response);
         if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Unable to load contract (${response.status}).`);
-        setContract(result.contract as Contract);
+        const nextContract = result.contract as Contract;
+        setContract({ ...nextContract, comments: sortCommentsLatestFirst(nextContract.comments || []) });
         setCurrentUserId(typeof result.currentUserId === "number" ? result.currentUserId : null);
       } catch (error) {
-        if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Unable to load contract.");
+        if (!controller.signal.aborted && showLoading) setLoadError(error instanceof Error ? error.message : "Unable to load contract.");
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted && showLoading) setLoading(false);
       }
-    })();
-    return () => controller.abort();
+    }
+
+    void loadContract(true);
+    const interval = window.setInterval(() => void loadContract(), 5000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
   }, [contractId]);
 
   // ── measure clause positions (relative to the paper) ──────────────
@@ -194,7 +209,7 @@ export default function ContractReview({ contractId }: { contractId: string }) {
       });
       const result = await readResponse(response);
       if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Unable to add comment (${response.status}).`);
-      setContract(current => current ? { ...current, comments: [...(current.comments || []), result.comment as Comment] } : current);
+      setContract(current => current ? { ...current, comments: sortCommentsLatestFirst([...(current.comments || []), result.comment as Comment]) } : current);
       setDraft(""); // popover stays open so the new comment appears in the thread
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to add comment.");

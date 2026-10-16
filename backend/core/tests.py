@@ -30,6 +30,12 @@ class ContractCollaborationTests(TestCase):
             expires_at=timezone.now() + timedelta(days=2),
         )
 
+    def test_health_endpoint_is_public_and_does_not_require_authentication(self):
+        response = self.client.get("/health/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
     def test_owner_can_read_and_edit_own_contract_but_not_another_users(self):
         self.client.force_login(self.owner)
         response = self.client.get(f"/api/contracts/{self.contract.id}/")
