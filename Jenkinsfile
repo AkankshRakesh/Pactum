@@ -346,6 +346,18 @@ pipeline {
                     string(
                         credentialsId: 'github-pactum-token',
                         variable: 'GITHUB_TOKEN'
+                    ),
+                    string(
+                        credentialsId: 'pactum-google-client-id',
+                        variable: 'GOOGLE_CLIENT_ID_CREDENTIAL'
+                    ),
+                    string(
+                        credentialsId: 'pactum-google-client-secret',
+                        variable: 'GOOGLE_CLIENT_SECRET_CREDENTIAL'
+                    ),
+                    string(
+                        credentialsId: 'pactum-google-redirect-uri',
+                        variable: 'GOOGLE_REDIRECT_URI_CREDENTIAL'
                     )
                 ]) {
                     powershell '''
@@ -362,6 +374,30 @@ pipeline {
                                 throw "Required credential is empty: $name"
                             }
                         }
+
+                        if (-not $env:GOOGLE_CLIENT_ID_CREDENTIAL -or
+                            -not $env:GOOGLE_CLIENT_SECRET_CREDENTIAL -or
+                            -not $env:GOOGLE_REDIRECT_URI_CREDENTIAL) {
+                            throw 'Google OAuth credentials are missing.'
+                        }
+
+                        $googleClientIdB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:GOOGLE_CLIENT_ID_CREDENTIAL.Trim()
+                            )
+                        )
+
+                        $googleClientSecretB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:GOOGLE_CLIENT_SECRET_CREDENTIAL.Trim()
+                            )
+                        )
+
+                        $googleRedirectUriB64 = [Convert]::ToBase64String(
+                            [Text.Encoding]::UTF8.GetBytes(
+                                $env:GOOGLE_REDIRECT_URI_CREDENTIAL.Trim()
+                            )
+                        )
 
                         $dbB64 = [Convert]::ToBase64String(
                             [Text.Encoding]::UTF8.GetBytes($env:SUPABASE_DB_PASSWORD)
@@ -418,7 +454,13 @@ DB_PASSWORD_B64='__DB_B64__'
 DJANGO_SECRET_KEY_B64='__DJANGO_B64__'
 SMTP_USER_B64='__SMTP_USER_B64__'
 SMTP_PASSWORD_B64='__SMTP_PASSWORD_B64__'
+GOOGLE_CLIENT_ID_B64='__GOOGLE_CLIENT_ID_B64__'
+GOOGLE_CLIENT_SECRET_B64='__GOOGLE_CLIENT_SECRET_B64__'
+GOOGLE_REDIRECT_URI_B64='__GOOGLE_REDIRECT_URI_B64__'
 
+GOOGLE_CLIENT_ID="$(printf '%s' "$GOOGLE_CLIENT_ID_B64" | base64 -d)"
+GOOGLE_CLIENT_SECRET="$(printf '%s' "$GOOGLE_CLIENT_SECRET_B64" | base64 -d)"
+GOOGLE_REDIRECT_URI="$(printf '%s' "$GOOGLE_REDIRECT_URI_B64" | base64 -d)"
 DB_PASSWORD="$(printf '%s' "$DB_PASSWORD_B64" | base64 -d)"
 DJANGO_SECRET_KEY="$(printf '%s' "$DJANGO_SECRET_KEY_B64" | base64 -d)"
 SMTP_USER="$(printf '%s' "$SMTP_USER_B64" | base64 -d)"
@@ -440,6 +482,17 @@ sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-smtp-secr
     --dry-run=client -o yaml |
     sudo /usr/local/bin/k3s kubectl apply -f -
 
+sudo /usr/local/bin/k3s kubectl -n pactum create secret generic pactum-google-oauth-secrets \
+    --from-literal=GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+    --from-literal=GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+    --from-literal=GOOGLE_REDIRECT_URI="$GOOGLE_REDIRECT_URI" \
+    --dry-run=client -o yaml |
+    sudo /usr/local/bin/k3s kubectl apply -f -
+
+
+unset GOOGLE_CLIENT_ID GOOGLE_CLIENT_ID_B64
+unset GOOGLE_CLIENT_SECRET GOOGLE_CLIENT_SECRET_B64
+unset GOOGLE_REDIRECT_URI GOOGLE_REDIRECT_URI_B64
 unset DB_PASSWORD DB_PASSWORD_B64
 unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 unset SMTP_PASSWORD SMTP_PASSWORD_B64
