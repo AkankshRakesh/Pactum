@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 
 import ContractLoader from "../ContractLoader";
 import { useConfirm } from "../../components/ConfirmDialog";
+import TemplateCard from "../../components/TemplateCard";
+import { templates } from "../../lib/templates";
+
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
@@ -36,68 +39,6 @@ const P = {
   borderStrong: "var(--d-border-strong)",
 };
 
-/* ─── template thumbnails (CSS art) ──────────────────────────────── */
-function ThumbServiceAgreement() {
-  return (
-    <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#1a0d10,#2d1520)", display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "16px", position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: 16, right: 16, width: 48, height: 48, borderRadius: "50%", border: "2px solid rgba(193,68,90,0.4)", opacity: 0.5 }} />
-      <div style={{ position: "absolute", top: 28, right: 28, width: 24, height: 24, borderRadius: "50%", background: "rgba(193,68,90,0.2)" }} />
-      {[0,1,2,3].map(i => (
-        <div key={i} style={{ height: 4, borderRadius: 2, background: i === 0 ? "rgba(193,68,90,0.9)" : "rgba(255,255,255,0.12)", marginBottom: 6, width: i === 3 ? "55%" : "100%" }} />
-      ))}
-      <div style={{ position: "absolute", top: 14, left: 14, fontFamily: "'Courier Prime', monospace", fontSize: 8, color: "rgba(193,68,90,0.7)", letterSpacing: "0.1em", textTransform: "uppercase" }}>PACTUM</div>
-    </div>
-  );
-}
-function ThumbNDA() {
-  return (
-    <div style={{ width: "100%", height: "100%", background: "#F4ECE4", display: "flex", flexDirection: "column", padding: "14px", position: "relative", overflow: "hidden" }}>
-      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 11, fontWeight: 700, color: "#1a0f10", marginBottom: 8 }}>Non-Disclosure Agreement</div>
-      <div style={{ height: 1, background: "#8B2635", marginBottom: 8, opacity: 0.4 }} />
-      {[0,1,2,3,4].map(i => (
-        <div key={i} style={{ height: 3, borderRadius: 1, background: "rgba(26,15,16,0.15)", marginBottom: 5, width: i === 4 ? "40%" : "100%" }} />
-      ))}
-      <div style={{ position: "absolute", bottom: 12, right: 12 }}>
-        <div style={{ width: 28, height: 28, border: "2px solid #8B2635", display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.6 }}>
-          <span style={{ fontSize: 10, color: "#8B2635", fontWeight: 700 }}>NDA</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-function ThumbFreelance() {
-  return (
-    <div style={{ width: "100%", height: "100%", background: "linear-gradient(160deg,#160B0C,#0F0708)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 14, position: "relative", overflow: "hidden" }}>
-      <div style={{ fontSize: 9, fontFamily: "'Courier Prime', monospace", color: "rgba(99,160,240,0.7)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 10 }}>Freelance Contract</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        {["You", "Client"].map(l => (
-          <div key={l} style={{ padding: "4px 10px", border: "1px solid rgba(193,68,90,0.35)", borderRadius: 2, fontSize: 9, color: "rgba(193,68,90,0.85)", fontFamily: "'DM Sans', sans-serif" }}>{l}</div>
-        ))}
-      </div>
-      <div style={{ width: "80%", height: 1, background: "rgba(99,160,240,0.2)", marginBottom: 8 }} />
-      {[1,2].map(i => (
-        <div key={i} style={{ height: 3, borderRadius: 1, background: "rgba(99,160,240,0.15)", marginBottom: 5, width: i === 2 ? "60%" : "100%" }} />
-      ))}
-      <div style={{ position: "absolute", bottom: 12, right: 14, fontSize: 9, fontFamily: "'Courier Prime', monospace", color: "rgba(99,160,240,0.4)" }}>100K+ Used</div>
-    </div>
-  );
-}
-function ThumbRetainer() {
-  return (
-    <div style={{ width: "100%", height: "100%", background: "#1c1410", display: "flex", flexDirection: "column", padding: "14px", position: "relative", overflow: "hidden" }}>
-      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 11, fontWeight: 700, color: "#C1445A", marginBottom: 6 }}>Retainer Agreement</div>
-      <div style={{ height: 1, background: "rgba(212,168,75,0.3)", marginBottom: 8 }} />
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        {["Monthly", "Quarterly"].map(l => (
-          <div key={l} style={{ padding: "3px 8px", background: "rgba(193,68,90,0.12)", border: "1px solid rgba(193,68,90,0.3)", fontSize: 8, color: "rgba(193,68,90,0.8)", fontFamily: "'DM Sans', sans-serif", borderRadius: 2 }}>{l}</div>
-        ))}
-      </div>
-      {[1,2,3].map(i => (
-        <div key={i} style={{ height: 3, borderRadius: 1, background: "rgba(212,168,75,0.12)", marginBottom: 5, width: i === 3 ? "50%" : "100%" }} />
-      ))}
-    </div>
-  );
-}
 
 /* ─── recent contract thumbnails ─────────────────────────────────── */
 const PAGE_W = 794; // match your editor's page width (A4 @ 96dpi)
@@ -166,24 +107,8 @@ function ContractPreview({ bodyHtml }: { bodyHtml?: string }) {
   );
 }
 
-/* ─── data ────────────────────────────────────────────────────────── */
-const templates = [
-  { id: 1, slug: "service-agreement",  title: "Service Agreement Template",     author: "Pactum Legal",     likes: "4.1k", users: "92k",  thumb: <ThumbServiceAgreement />, badge: "Most Used" },
-  { id: 2, slug: "nda",                title: "Non-Disclosure Agreement (NDA)", author: "Legal Vault",      likes: "2.8k", users: "61k",  thumb: <ThumbNDA /> },
-  { id: 3, slug: "freelance-contract", title: "Freelance Contract Starter",     author: "Pactum Community", likes: "3.3k", users: "108k", thumb: <ThumbFreelance />, badge: "100K+ Used" },
-  { id: 4, slug: "monthly-retainer",   title: "Monthly Retainer Agreement",     author: "Pactum Legal",     likes: "1.9k", users: "34k",  thumb: <ThumbRetainer /> },
-];
 
-const recents = [
-  { id: "PA-2026-0841", title: "Unique Contract Platform Design", edited: "26 minutes ago", color: "#F0EBE3", dark: false },
-  { id: "PA-2026-0792", title: "Untitled",                        edited: "17 days ago",    color: "#1a1a1a", dark: true  },
-  { id: "PA-2026-0750", title: "Simulation Web Page Design",      edited: "17 days ago",    color: "#160B0C", dark: true  },
-  { id: "PA-2026-0701", title: "Config 2026 Playground",          edited: "18 days ago",    color: "#333",    dark: true  },
-  { id: "PA-2026-0688", title: "Brand Identity Contract",         edited: "22 days ago",    color: "#1c0d10", dark: true  },
-  { id: "PA-2026-0612", title: "API Integration Agreement",       edited: "1 month ago",    color: "#0a2010", dark: true  },
-  { id: "PA-2026-0600", title: "Motion Graphics Package",         edited: "1 month ago",    color: "#2A1117", dark: true  },
-  { id: "PA-2026-0580", title: "Content Strategy Retainer",      edited: "2 months ago",   color: "#F4ECE4", dark: false },
-];
+const TEMPLATES_PER_PAGE = 4;
 
 const VIEWS = ["All", "Recently viewed", "Invited", "Shared contracts", "Archived"] as const;
 type View = typeof VIEWS[number];
@@ -230,6 +155,7 @@ export default function Dashboard() {
   const [view, setView] = useState<View>("All");
   const [savedContracts, setSavedContracts] = useState<DashboardContract[]>([]);
   const [invitedContracts, setInvitedContracts] = useState<DashboardContract[]>([]);
+  const [templateOffset, setTemplateOffset] = useState(0);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -374,6 +300,9 @@ export default function Dashboard() {
   };
 
   const now = Date.now();
+  const visibleTemplates = Array.from({ length: Math.min(TEMPLATES_PER_PAGE, templates.length) }, (_, i) =>
+    templates[(templateOffset + i) % templates.length]
+  );
   const allContracts = [
     ...savedContracts,
     ...invitedContracts.filter(invited => !savedContracts.some(owned => owned.id === invited.id)),
@@ -451,10 +380,6 @@ export default function Dashboard() {
 
         {/* right */}
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, order: isMobile ? 2 : 3 }}>
-          <div style={{ position: "relative", cursor: "pointer", fontSize: 18 }}>
-            🔔
-            <div style={{ position: "absolute", top: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: P.accent, border: `2px solid ${P.surface}` }} />
-          </div>
           <button
             onClick={() => router.push("/new")}
             style={{
@@ -504,6 +429,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 {/* refresh */}
                 <button
+                  onClick={() => setTemplateOffset(o => (o + TEMPLATES_PER_PAGE) % templates.length)}
                   style={{ background: "transparent", border: "none", cursor: "pointer", color: P.textMuted, fontSize: 16, padding: 2, lineHeight: 1, transition: "color 0.15s" }}
                   onMouseEnter={e => (e.currentTarget.style.color = P.text)}
                   onMouseLeave={e => (e.currentTarget.style.color = P.textMuted)}
@@ -527,49 +453,13 @@ export default function Dashboard() {
             } : {
               display: "grid", gridTemplateColumns: isTablet ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 14,
             }}>
-              {templates.map(t => (
-                <div
+              {visibleTemplates.map(t => (
+                <TemplateCard
                   key={t.id}
-                  role="link"
-                  tabIndex={0}
-                  onClick={() => router.push(`/new?template=${t.slug}`)}
-                  onKeyDown={e => { if (e.key === "Enter") router.push(`/new?template=${t.slug}`); }}
-                  style={{ cursor: "pointer", ...(isMobile && { flex: "0 0 220px", scrollSnapAlign: "start" }) }}
-                  onMouseEnter={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "0.85"}
-                  onMouseLeave={e => ((e.currentTarget as HTMLElement).querySelector(".t-thumb")! as HTMLElement).style.opacity = "1"}
-                >
-                  {/* thumbnail */}
-                  <div
-                    className="t-thumb"
-                    style={{
-                      height: 148,
-                      borderRadius: 6,
-                      overflow: "hidden",
-                      border: `1px solid ${P.border}`,
-                      marginBottom: 10,
-                      transition: "opacity 0.18s",
-                      position: "relative",
-                    }}
-                  >
-                    {t.thumb}
-                    {t.badge && (
-                      <div style={{
-                        position: "absolute", top: 8, left: 8,
-                        background: P.accent,
-                        color: "#fff", fontSize: 9, fontWeight: 600,
-                        padding: "2px 7px", borderRadius: 4,
-                        letterSpacing: "0.05em",
-                      }}>{t.badge}</div>
-                    )}
-                  </div>
-                  {/* meta */}
-                  <div style={{ fontSize: 12, fontWeight: 600, color: P.text, marginBottom: 4, lineHeight: 1.35 }}>{t.title}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: P.textMuted }}>
-                    <span>by {t.author}</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>♡ {t.likes}</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>👤 {t.users}</span>
-                  </div>
-                </div>
+                  t={t}
+                  onOpen={() => router.push(`/new?template=${t.slug}`)}
+                  style={isMobile ? { flex: "0 0 220px", scrollSnapAlign: "start" } : undefined}
+                />
               ))}
             </div>
 
@@ -578,6 +468,7 @@ export default function Dashboard() {
               <span style={{ fontSize: 12, color: P.accent, cursor: "pointer", fontWeight: 500, transition: "color 0.15s" }}
                 onMouseEnter={e => (e.currentTarget.style.color = P.accentHover)}
                 onMouseLeave={e => (e.currentTarget.style.color = P.accent)}
+                onClick={() => router.push("/templates")}
               >
                 See all templates →
               </span>

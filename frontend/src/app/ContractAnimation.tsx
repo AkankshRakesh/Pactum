@@ -180,21 +180,32 @@ export default function ContractAnimation() {
   }, []);
 
   return (
-    <div ref={stageRef} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
+    <div
+      ref={stageRef}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        height: "100%",
+        background: "transparent",
+      }}
+    >
       <style>{`
         #ca-stage {
           position: relative;
           width: 320px;
           height: 560px;
           overflow: hidden;
-          background: #f4f3ef;
+          background: transparent !important;
           border-radius: 4px;
-          border: 1px solid rgba(26,24,16,0.15);
-          box-shadow: 8px 16px 48px rgba(0,0,0,0.18);
+          border: none;
+          box-shadow: none;
         }
+
         .dark #ca-stage {
-          background: #1e1b14;
-          border-color: rgba(232,224,204,0.1);
+          background: transparent !important;
+          border-color: transparent;
         }
         #ca-camera {
           position: absolute; top: 0; left: 0;

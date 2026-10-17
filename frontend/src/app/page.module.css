@@ -1,54 +1,522 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+.homePage {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  background: #0a0607;
+}
 
-:global(:root) { --paper: #f4efe3; --paper-dark: #ebe4d4; --ink: #1a1810; --ink-faded: rgba(26,24,16,.45); --ink-ghost: rgba(26,24,16,.12); --red: #b81c10; --rule: rgba(26,24,16,.18); --shadow: rgba(26,24,16,.12); --tint: rgba(26,24,16,.018); }
-:global(.dark) { --paper: #151210; --paper-dark: #1c1814; --ink: #e8e0cc; --ink-faded: rgba(232,224,204,.45); --ink-ghost: rgba(232,224,204,.08); --red: #cc3322; --rule: rgba(232,224,204,.12); --shadow: rgba(0,0,0,.5); --tint: rgba(232,224,204,.025); }
-:global(html), :global(body) { height: 100%; margin: 0; padding: 0; }
-:global(body) { background: var(--paper-dark); color: var(--ink); font-family: 'DM Sans', Arial, sans-serif; transition: background .35s ease, color .35s ease; }
-.homePage::before { content: ''; position: fixed; inset: 0; background-image: repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(26,24,16,.035) 27px,rgba(26,24,16,.035) 28px); pointer-events: none; z-index: 1000; }
-:global(a) { color: inherit; }
+.pageBg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+}
 
-.docShell { background: var(--paper); margin: 0 auto; box-shadow: 0 0 80px var(--shadow); transition: background .35s ease, box-shadow .35s ease; }
-.modeToggle { position: fixed; bottom: 28px; right: 28px; z-index: 9999; width: 44px; height: 44px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18px; transition: background .25s,color .25s,border-color .25s; box-shadow: 0 2px 12px var(--shadow); }
-.modeToggle:hover { border-color: var(--red); }
-.splash { position: relative; min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; background: var(--paper);}
-.splashPanel { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 80px 64px 80px 80px; border-right: 1px solid var(--rule); background-image: repeating-linear-gradient(transparent,transparent 27px,var(--ink-ghost) 27px,var(--ink-ghost) 28px); }
-.splashMeta { position: absolute; top: 28px; left: 88px; font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; color: var(--ink-faded); letter-spacing: .16em; text-transform: uppercase; line-height: 1.9; }
-.splashBrandLabel { font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; letter-spacing: .38em; color: var(--ink-faded); text-transform: uppercase; margin-bottom: 14px; }
-.splashBrandName { font-family: 'Playfair Display',Georgia,serif; font-size: clamp(48px,7vw,96px); font-weight: 900; line-height: .9; margin: 0; letter-spacing: -.025em; color: var(--ink); }
-.splashBrandDivider { height: 1px; background: var(--ink); margin: 28px 0; opacity: .15; max-width: 320px; }
-.splashBrandPills { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin-bottom: 36px; }
-.splashBrandPill { display: flex; align-items: center; gap: 20px; font-family: 'DM Sans', Arial, sans-serif; font-size: 10px; letter-spacing: .2em; color: var(--ink-faded); text-transform: uppercase; }
-.splashBrandPill::after { content: ''; width: 3px; height: 3px; background: var(--red); border-radius: 50%; display: inline-block; }
-.splashBrandPill:last-child::after { display: none; }
-.splashCta { display: inline-flex; align-items: center; width: fit-content; padding: 14px 32px; background: var(--ink); color: var(--paper); font-family: 'DM Sans', Arial, sans-serif; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; text-decoration: none; border: 1px solid var(--ink); transition: background .2s ease,color .2s ease,transform .15s ease; }
-.splashCta:hover { background: transparent; color: var(--ink); transform: translateX(2px); }
-.splashStage { position: relative; display: flex; align-items: center; justify-content: center; background: var(--tint); background-image: repeating-linear-gradient(transparent,transparent 27px,var(--ink-ghost) 27px,var(--ink-ghost) 28px); overflow: hidden; opacity: 0; transition: opacity .8s ease .3s; }
-.splashReady { opacity: 1; }
-.caViewport { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.caStage { position: relative; width: 320px; height: 560px; overflow: hidden; background: #f4f3ef; transform-origin: center center; flex-shrink: 0; transition: transform .2s ease; }
-:global(.dark) .caStage { background: #1e1b14; }
-.caCamera { position: absolute; top: 0; left: 0; width: 320px; height: 560px; transform-origin: 0 0; transition: transform 1.3s cubic-bezier(.65,0,.35,1); }
-.caStartScreen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .6s ease; }
-.caMakeBtn { font-family: 'Courier Prime',monospace; font-size: 13px; padding: 10px 18px; border: 1px solid rgba(26,24,16,.25); background: #fff; color: #1a1810; cursor: pointer; letter-spacing: .04em; transition: transform .15s ease,filter .15s ease; }
-:global(.dark) .caMakeBtn { background: #2a2620; color: #e8e0cc; border-color: rgba(232,224,204,.2); }
-.caDoc { position: absolute; top: 40px; left: 20px; width: 280px; min-height: 420px; background: #fff; border: 1px solid #e2e0d8; padding: 20px 22px; opacity: 0; transition: transform .9s cubic-bezier(.5,0,.75,0),opacity .9s ease; }
-:global(.dark) .caDoc { background: #252018; border-color: rgba(232,224,204,.12); }
-.caDocTitle { font-family: 'Playfair Display',serif; font-size: 14px; font-weight: 700; color: #1a1810; min-height: 20px; }
-:global(.dark) .caDocTitle, :global(.dark) .caClause { color: #e8e0cc; }
-.caDivider { height: 1px; background: rgba(26,24,16,.15); margin: 10px 0 14px; }
-:global(.dark) .caDivider { background: rgba(232,224,204,.12); }
-.caClause { font-size: 11px; line-height: 1.7; color: #1a1810; min-height: 16px; margin-top: 8px; }
-.caSuggestionBox { margin-top: 10px; padding: 8px 10px; background: rgba(184,28,16,.06); border: 1px solid rgba(184,28,16,.3); font-size: 11px; color: #b81c10; display: none; font-family: 'Courier Prime',monospace; }
-.caSigBlock { display: flex; flex-direction: column; gap: 16px; }
-.caSigLabel { font-size: 9px; color: #8a887f; margin-bottom: 4px; letter-spacing: .1em; text-transform: uppercase; }
-.caSigLine { height: 26px; border-bottom: 1px solid rgba(26,24,16,.3); font-family: 'Playfair Display',serif; font-style: italic; font-size: 15px; color: #1a1810; }
-:global(.dark) .caSigLine { border-color: rgba(232,224,204,.25); color: #e8e0cc; }
-.caPrintRow { margin-top: 22px; text-align: center; opacity: 0; transition: opacity .4s ease; }
-.caPrintBtn { font-family: 'Courier Prime',monospace; font-size: 12px; padding: 9px 20px; border: 1px solid rgba(26,24,16,.3); background: #1a1810; color: #f4efe3; cursor: pointer; letter-spacing: .1em; text-transform: uppercase; transition: transform .15s ease,filter .15s ease; }
-:global(.dark) .caPrintBtn { background: #e8e0cc; color: #1a1810; }
-.caLockBadge { margin-top: 14px; display: none; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: #2f7d4f; letter-spacing: .08em; }
-.caBtnPress { transform: scale(.92); filter: brightness(.9); }
+.pageBg > div,
+.pageBg canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 
-@media (max-width: 900px) { .splash { grid-template-columns: 1fr; position: relative; } .splashStage { position: absolute; inset: 0; padding: 0; z-index: 1; } .splashPanel { position: relative; z-index: 2; border-right: none; border-bottom: none; min-height: 100vh; padding: 100px 32px 48px; background: rgba(244,239,227,.88); } :global(.dark) .splashPanel { background: rgba(21,18,16,.85); } .splashMeta { left: 32px; } }
-@media (max-width: 520px) { .splashPanel { padding: 90px 20px 40px; } .splashBrandName { font-size: clamp(36px,12vw,52px); } .splashBrandPills { gap: 14px; margin-bottom: 28px; } .splashCta { width: 100%; justify-content: center; padding: 14px 24px; } .caStage,.caCamera,.caStartScreen { width: 280px; height: 490px; } .caDoc { width: 240px; left: 20px; } }
+.docShell {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Splash layout */
+.splash {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
+.splashPanel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px 64px 80px 80px;
+  background: transparent;
+}
+
+.splashFluid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.splashFluid > div,
+.splashFluid canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.splashMeta {
+  position: absolute;
+  top: 28px;
+  left: 88px;
+  z-index: 1;
+  pointer-events: none;
+  color: white;
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.9;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.splashContent {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.splashCta {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 14px 32px;
+  pointer-events: auto;
+  border: 1px solid white;
+  background: white;
+  color: #1a1810;
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+
+.splashCta:hover {
+  background: transparent;
+  color: white;
+  transform: translateX(2px);
+}
+
+.splashBrandLabel {
+  margin-bottom: 14px;
+  color: white;
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+}
+
+.splashBrandName {
+  margin: 0;
+  color: white;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: clamp(48px, 7vw, 96px);
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  line-height: 0.9;
+}
+
+.splashBrandDivider {
+  max-width: 320px;
+  height: 1px;
+  margin: 28px 0;
+  background: white;
+  opacity: 0.15;
+}
+
+.splashBrandPills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 36px;
+}
+
+.splashBrandPill {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: white;
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.splashBrandPill::after {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--red);
+  content: "";
+}
+
+.splashBrandPill:last-child::after {
+  display: none;
+}
+
+/* Keep the animation on the same dark canvas as the left panel. */
+.splashStage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s ease 0.3s;
+}
+
+.splashReady {
+  opacity: 1;
+}
+
+/* Contract animation */
+.caViewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.caStage {
+  position: relative;
+  flex-shrink: 0;
+  width: 320px;
+  height: 560px;
+  overflow: hidden;
+  background: #0a0607;
+  transform-origin: center center;
+  transition: transform 0.2s ease;
+}
+
+.caCamera {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 320px;
+  height: 560px;
+  transform-origin: 0 0;
+  transition: transform 1.3s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.caStartScreen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.caMakeBtn,
+.caPrintBtn {
+  cursor: pointer;
+  font-family: "Courier Prime", monospace;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.caMakeBtn {
+  padding: 10px 18px;
+  border: 1px solid rgba(26, 24, 16, 0.25);
+  background: #fff;
+  color: #1a1810;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.caDoc {
+  position: absolute;
+  top: 40px;
+  left: 20px;
+  width: 280px;
+  min-height: 420px;
+  padding: 20px 22px;
+  border: 1px solid #e2e0d8;
+  background: #fff;
+  opacity: 0;
+  transition: transform 0.9s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.9s ease;
+}
+
+.caDocTitle {
+  min-height: 20px;
+  color: #1a1810;
+  font-family: "Playfair Display", serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.caDivider {
+  height: 1px;
+  margin: 10px 0 14px;
+  background: rgba(26, 24, 16, 0.15);
+}
+
+.caClause {
+  min-height: 16px;
+  margin-top: 8px;
+  color: #1a1810;
+  font-family: "Courier Prime", monospace;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.caSuggestionBox {
+  display: none;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(184, 28, 16, 0.3);
+  background: rgba(184, 28, 16, 0.06);
+  color: #b81c10;
+  font-family: "Courier Prime", monospace;
+  font-size: 11px;
+}
+
+.caSigBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.caSigLabel {
+  margin-bottom: 4px;
+  color: #8a887f;
+  font-family: "Courier Prime", monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.caSigLine {
+  height: 26px;
+  border-bottom: 1px solid rgba(26, 24, 16, 0.3);
+  color: #1a1810;
+  font-family: "Playfair Display", serif;
+  font-size: 15px;
+  font-style: italic;
+}
+
+.caPrintRow {
+  margin-top: 22px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.caPrintBtn {
+  padding: 9px 20px;
+  border: 1px solid rgba(26, 24, 16, 0.3);
+  background: #1a1810;
+  color: #f4efe3;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.caLockBadge {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: #2f7d4f;
+  font-family: "Courier Prime", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.caBtnPress {
+  transform: scale(0.92);
+  filter: brightness(0.9);
+}
+
+/* Theme adjustments */
+:global(.dark) .splashMeta,
+:global(.dark) .splashBrandLabel,
+:global(.dark) .splashBrandPill {
+  color: rgba(244, 239, 227, 0.55);
+}
+
+:global(.dark) .splashBrandName {
+  color: #f4efe3;
+}
+
+:global(.dark) .splashBrandDivider {
+  background: #f4efe3;
+}
+
+:global(.dark) .splashCta {
+  border-color: #f4efe3;
+  background: #f4efe3;
+  color: #151210;
+}
+
+:global(.dark) .splashCta:hover {
+  background: transparent;
+  color: #f4efe3;
+}
+
+
+
+@media (max-width: 900px) {
+  .splash {
+    position: relative;
+    grid-template-columns: 1fr;
+  }
+
+  .splashStage {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: 0;
+  }
+
+  .splashPanel {
+    position: relative;
+    z-index: 2;
+    min-height: 100vh;
+    padding: 100px 32px 48px;
+    border-right: none;
+    border-bottom: none;
+    background: rgba(244, 239, 227, 0.88);
+  }
+
+  :global(.dark) .splashPanel {
+    background: rgba(21, 18, 16, 0.85);
+  }
+
+  .splashMeta {
+    left: 32px;
+  }
+}
+
+@media (max-width: 520px) {
+  .splashPanel {
+    padding: 90px 20px 40px;
+  }
+
+  .splashBrandName {
+    font-size: clamp(36px, 12vw, 52px);
+  }
+
+  .splashBrandPills {
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .splashCta {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 24px;
+  }
+
+  .caStage,
+  .caCamera,
+  .caStartScreen {
+    width: 280px;
+    height: 490px;
+  }
+
+  .caDoc {
+    left: 20px;
+    width: 240px;
+  }
+}
+
+
+/* Transparent contract animation */
+.caViewport,
+.caStage,
+.caCamera,
+.caStartScreen {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Beat any legacy ID-based background rules */
+:global(#ca-stage) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Contract surface: light mode */
+.caDoc {
+  background: rgba(250, 248, 244, 0.96);
+  border: 1px solid rgba(26, 24, 16, 0.16);
+  backdrop-filter: blur(4px);
+}
+
+/* Contract surface: dark mode */
+:global(.dark) .caDoc {
+  background: rgba(36, 33, 31, 0.92);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+/* Contract text — light mode */
+.caDocTitle,
+.caClause,
+.caSigLine {
+  color: #1a1810;
+}
+
+.caSigLabel {
+  color: #8a887f;
+}
+
+.caDivider {
+  background: rgba(26, 24, 16, 0.15);
+}
+
+.caSigLine {
+  border-bottom-color: rgba(26, 24, 16, 0.3);
+}
+
+/* Contract text — dark mode */
+:global(.dark) .caDocTitle,
+:global(.dark) .caClause,
+:global(.dark) .caSigLine {
+  color: #f4efe3;
+}
+
+:global(.dark) .caSigLabel {
+  color: rgba(244, 239, 227, 0.55);
+}
+
+:global(.dark) .caDivider {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+:global(.dark) .caSigLine {
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+
+.caMakeBtn,
+.caPrintBtn {
+  background: transparent;
+  color: #f4efe3;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.caSuggestionBox {
+  background: rgba(255, 90, 80, 0.08);
+  border-color: rgba(255, 120, 110, 0.5);
+  color: #ff8a80;
+}
+
+.caLockBadge {
+  color: #7fd6a0;
+}

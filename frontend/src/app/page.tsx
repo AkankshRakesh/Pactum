@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import Threads from "../components/Ferrofluid";
+
 import styles from "./page.module.css";
 
 const VIEW_W = 320;
@@ -503,6 +505,27 @@ export default function Home() {
 
   return (
     <main className={styles.homePage}>
+              <div className={styles.pageBg} aria-hidden>
+                <Threads
+                  color="#ffffff"
+                  lineCount={90}
+                  thickness={0.6}
+                  softness={1.8}
+                  amplitude={1.7}
+                  distance={0.4}
+                  waves={1.05}
+                  speed={0.3}
+                  split={0.04}
+                  fray={0.5}
+                  angle={25}
+                  taper={0.85}
+                  brightness={1.4}
+                  parting={0}
+                  fade={0}
+                  opacity={0.5}
+                  seed={0}
+                />
+              </div>
       <div className={styles.docShell}>
         <section className={styles.splash} id="splash">
           <div className={styles.splashPanel}>
@@ -513,6 +536,7 @@ export default function Home() {
             </div>
 
             <div>
+              <div className={styles.splashContent}>
               <div className={styles.splashBrandLabel}>
                 The Contract Platform
               </div>
@@ -535,6 +559,7 @@ export default function Home() {
               <a href="/dashboard" className={styles.splashCta}>
                 Get started →
               </a>
+            </div>
             </div>
           </div>
 
