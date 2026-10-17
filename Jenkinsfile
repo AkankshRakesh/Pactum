@@ -179,10 +179,12 @@ pipeline {
                                 if (-not $outputs.InstanceIds -or
                                     -not $outputs.LoadBalancerDNS -or
                                     -not $outputs.InstancePrivateIps -or
-                                    -not $outputs.MonitoringInstanceId) {
+                                    -not $outputs.MonitoringInstanceId -or
+                                    -not $outputs.GrafanaAdminSecretArn) {
                                     throw 'Missing required CloudFormation outputs.'
                                 }
 
+                                Write-Output "GRAFANA_SECRET_ARN=$($outputs.GrafanaAdminSecretArn)"
                                 Write-Output "INSTANCE_IDS=$($outputs.InstanceIds)"
                                 Write-Output "ALB_DNS=$($outputs.LoadBalancerDNS)"
                                 Write-Output "INSTANCE_PRIVATE_IPS=$($outputs.InstancePrivateIps)"
@@ -211,6 +213,17 @@ pipeline {
                         if (!monitoringLine) {
                             error("Could not parse MonitoringInstanceId from CloudFormation outputs: ${result}")
                         }
+
+                        def grafanaSecretLine = result.readLines().find {
+                            it.startsWith('GRAFANA_SECRET_ARN=')
+                        }
+
+                        if (!grafanaSecretLine) {
+                            error("Could not parse Grafana secret ARN from CloudFormation outputs: ${result}")
+                        }
+
+                        env.PACTUM_GRAFANA_SECRET_ARN =
+                            grafanaSecretLine.substring('GRAFANA_SECRET_ARN='.length())
 
                         env.PACTUM_MONITORING_INSTANCE_ID =
                             monitoringLine.substring('MONITORING_INSTANCE_ID='.length())
@@ -631,6 +644,10 @@ echo "Node Exporter is running on port 9100."
                             $commands += "printf '%s' '$chunk' >> /tmp/pactum-monitoring.b64"
                         }
 
+                        if (-not $env:PACTUM_GRAFANA_SECRET_ARN) {
+                            throw 'Grafana secret ARN is missing from CloudFormation outputs.'
+                        }
+
                         $commands += @(
                             'set -e',
                             'base64 -d /tmp/pactum-monitoring.b64 > /tmp/pactum-setup-monitoring.sh',
@@ -638,7 +655,7 @@ echo "Node Exporter is running on port 9100."
                             'command -v bash',
                             '/bin/bash --version',
                             '/bin/bash -n /tmp/pactum-setup-monitoring.sh',
-                            "/bin/bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'",
+                            "/bin/bash /tmp/pactum-setup-monitoring.sh '$env:PACTUM_GRAFANA_SECRET_ARN' '$($ips[0])' '$($ips[1])'",
                             'rm -f /tmp/pactum-monitoring.b64 /tmp/pactum-setup-monitoring.sh'
                         )
 

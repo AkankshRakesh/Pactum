@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 exec > >(tee -a /var/log/pactum-monitoring-setup.log) 2>&1
 
-REGION="ap-south-1"
-GRAFANA_SECRET_ARN="arn:aws:secretsmanager:ap-south-1:442999092714:secret:pactum-backend/grafana-admin-RE7cjF"
+REGION="${AWS_REGION:-ap-south-1}"
+GRAFANA_SECRET_ARN="${1:?Usage: $0 <grafana-secret-arn> <backend-ip-1> <backend-ip-2>}"
 
 PROMETHEUS_IMAGE="prom/prometheus:v3.5.0"
 GRAFANA_IMAGE="grafana/grafana:12.2.0"
@@ -15,12 +15,13 @@ die() {
     exit 1
 }
 
-if [[ $# -ne 2 ]]; then
-    die "Usage: $0 <backend-private-ip-1> <backend-private-ip-2>"
+if [[ $# -ne 3 ]]; then
+    die "Usage: $0 <grafana-secret-arn> <backend-private-ip-1> <backend-private-ip-2>"
 fi
 
-BACKEND_IP_1="$1"
-BACKEND_IP_2="$2"
+GRAFANA_SECRET_ARN="$1"
+BACKEND_IP_1="$2"
+BACKEND_IP_2="$3"
 
 validate_ipv4() {
     local ip="$1"
