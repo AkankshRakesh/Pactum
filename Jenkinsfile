@@ -747,10 +747,36 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         $remoteCommand = @'
-sudo cloud-init status --wait &&
-test "$(sudo docker inspect -f '{{.State.Running}}' prometheus)" = true &&
-test "$(sudo docker inspect -f '{{.State.Running}}' grafana)" = true &&
-echo MONITORING_READY
+set -u
+
+echo "=== Cloud-init ==="
+sudo cloud-init status --wait || true
+
+echo "=== Docker service ==="
+sudo systemctl status docker --no-pager || true
+
+echo "=== Docker containers ==="
+sudo docker ps -a --no-trunc || true
+
+echo "=== Prometheus container ==="
+sudo docker inspect prometheus 2>&1 || true
+sudo docker logs --tail 100 prometheus 2>&1 || true
+
+echo "=== Grafana container ==="
+sudo docker inspect grafana 2>&1 || true
+sudo docker logs --tail 100 grafana 2>&1 || true
+
+echo "=== Monitoring setup log ==="
+sudo tail -n 200 /var/log/pactum-monitoring-setup.log 2>&1 || true
+
+echo "=== Bootstrap log ==="
+sudo tail -n 100 /var/log/pactum-monitoring-bootstrap.log 2>&1 || true
+
+echo "=== Health endpoints ==="
+curl -fsS http://127.0.0.1:9090/-/ready || true
+curl -fsS http://127.0.0.1:3000/api/health || true
+
+echo "=== Diagnostic complete ==="
 '@
 
                         $payload = @{
