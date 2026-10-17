@@ -550,7 +550,7 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         foreach ($ip in $ips) {
-                            if ($ip -notmatch '^(?:\d{1,3}\.){3}\d{1,3}$') {
+                           if ($ip -notmatch '^(?:\\d{1,3}\\.){3}\\d{1,3}$') {
                                 throw "Invalid backend private IP: $ip"
                             }
 
