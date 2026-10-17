@@ -54,7 +54,8 @@ pipeline {
                         'infra/cloudformation/pactum-backend.yaml',
                         'deploy/kubernetes/backend-service.yaml',
                         'deploy/kubernetes/backend-deployment.yaml',
-                        'deploy/kubernetes/django-migration-job.yaml'
+                        'deploy/kubernetes/django-migration-job.yaml',
+                        'infra/scripts/setup-monitoring.sh'
                     )) {
                         if (-not (Test-Path $path)) {
                             throw "Missing required file: $path"
@@ -345,148 +346,6 @@ pipeline {
             }
         }
 
-        stage('Verify Monitoring Services') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
-                ]) {
-                    powershell '''
-                        $ErrorActionPreference = 'Stop'
-                        $instanceId = $env:PACTUM_MONITORING_INSTANCE_ID
-
-                        if (-not $instanceId) {
-                            throw 'PACTUM_MONITORING_INSTANCE_ID is missing.'
-                        }
-
-                        $online = $false
-
-                        for ($i = 0; $i -lt 60; $i++) {
-                            $status = & aws ssm describe-instance-information `
-                                --region $env:AWS_REGION `
-                                --filters "Key=InstanceIds,Values=$instanceId" `
-                                --query "InstanceInformationList[0].PingStatus" `
-                                --output text 2>&1
-
-                            if ($LASTEXITCODE -eq 0 -and
-                                "$status".Trim() -eq 'Online') {
-                                $online = $true
-                                break
-                            }
-
-                            Start-Sleep -Seconds 10
-                        }
-
-                        if (-not $online) {
-                            throw "Monitoring instance $instanceId did not become available in SSM."
-                        }
-
-                        $remoteCommand = @'
-sudo cloud-init status --wait &&
-test "$(sudo docker inspect -f '{{.State.Running}}' prometheus)" = true &&
-test "$(sudo docker inspect -f '{{.State.Running}}' grafana)" = true &&
-echo MONITORING_READY
-'@
-
-                        $payload = @{
-                            InstanceIds = @($instanceId)
-                            DocumentName = 'AWS-RunShellScript'
-                            Comment = 'Verify Pactum Prometheus and Grafana'
-                            Parameters = @{
-                                commands = @($remoteCommand)
-                            }
-                            TimeoutSeconds = 900
-                        }
-
-                        $path = Join-Path $env:TEMP (
-                            'pactum-monitor-check-' +
-                            [guid]::NewGuid().ToString('N') + '.json'
-                        )
-
-                        try {
-                            [IO.File]::WriteAllText(
-                                $path,
-                                ($payload | ConvertTo-Json -Depth 8 -Compress),
-                                [System.Text.UTF8Encoding]::new($false)
-                            )
-
-                            $commandId = & aws ssm send-command `
-                                --region $env:AWS_REGION `
-                                --cli-input-json "file://$path" `
-                                --query 'Command.CommandId' `
-                                --output text
-
-                            if ($LASTEXITCODE -ne 0) {
-                                throw 'Could not submit monitoring verification command.'
-                            }
-                        }
-                        finally {
-                            Remove-Item $path -Force -ErrorAction SilentlyContinue
-                        }
-
-                        $commandId = "$commandId".Trim()
-                        $finished = $false
-
-                        for ($i = 0; $i -lt 180; $i++) {
-                            Start-Sleep -Seconds 5
-
-                            $status = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $instanceId `
-                                --query Status `
-                                --output text 2>&1
-
-                            if ($LASTEXITCODE -ne 0) {
-                                continue
-                            }
-
-                            $status = "$status".Trim()
-
-                            if ($status -eq 'Success') {
-                                $finished = $true
-                                break
-                            }
-
-                            if ($status -in @(
-                                'Failed', 'Cancelled', 'TimedOut'
-                            )) {
-                                break
-                            }
-                        }
-
-                        $stdout = & aws ssm get-command-invocation `
-                            --region $env:AWS_REGION `
-                            --command-id $commandId `
-                            --instance-id $instanceId `
-                            --query StandardOutputContent `
-                            --output text 2>&1
-
-                        if ($stdout) {
-                            Write-Host $stdout
-                        }
-
-                        if (-not $finished -or
-                            "$stdout" -notmatch 'MONITORING_READY') {
-                            $stderr = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $instanceId `
-                                --query StandardErrorContent `
-                                --output text 2>&1
-
-                            throw "Monitoring services did not become ready: $stderr"
-                        }
-
-                        Write-Host 'Prometheus and Grafana are running.'
-                    '''
-                }
-            }
-        }
-
         stage('Install Node Exporter') {
             steps {
                 withCredentials([
@@ -661,6 +520,335 @@ echo "Node Exporter is running on port 9100."
                 }
             }
         }
+
+        stage('Configure Monitoring') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+
+                        $instanceId = $env:PACTUM_MONITORING_INSTANCE_ID
+
+                        if (-not $instanceId) {
+                            throw 'Monitoring instance ID is missing.'
+                        }
+
+                        $ips = @(
+                            $env:PACTUM_PRIVATE_IPS.Split(',') |
+                            ForEach-Object { $_.Trim() } |
+                            Where-Object { $_ }
+                        )
+
+                        if ($ips.Count -ne 2) {
+                            throw "Expected two backend private IPs; got $($ips.Count)."
+                        }
+
+                        foreach ($ip in $ips) {
+                            if ($ip -notmatch '^(?:\\d{1,3}\\.){3}\\d{1,3}$') {
+                                throw "Invalid backend private IP: $ip"
+                            }
+                        }
+
+                        $scriptPath = Join-Path `
+                            $env:WORKSPACE `
+                            'infra/scripts/setup-monitoring.sh'
+
+                        if (-not (Test-Path $scriptPath)) {
+                            throw "Missing monitoring script: $scriptPath"
+                        }
+
+                        # Wait for the monitoring instance to become SSM Online.
+                        $online = $false
+
+                        for ($i = 0; $i -lt 60; $i++) {
+                            $status = & aws ssm describe-instance-information `
+                                --region $env:AWS_REGION `
+                                --filters "Key=InstanceIds,Values=$instanceId" `
+                                --query "InstanceInformationList[0].PingStatus" `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -eq 0 -and
+                                "$status".Trim() -eq 'Online') {
+                                $online = $true
+                                break
+                            }
+
+                            Start-Sleep -Seconds 10
+                        }
+
+                        if (-not $online) {
+                            throw "Monitoring instance $instanceId is not SSM Online."
+                        }
+
+                        # Encode the script and split it into shell-safe chunks.
+                        $encoded = [Convert]::ToBase64String(
+                            [IO.File]::ReadAllBytes($scriptPath)
+                        )
+
+                        $chunks = @()
+                        for ($offset = 0; $offset -lt $encoded.Length; $offset += 3000) {
+                            $length = [Math]::Min(3000, $encoded.Length - $offset)
+                            $chunks += $encoded.Substring($offset, $length)
+                        }
+
+                        $commands = @(
+                            'cloud-init status --wait >/dev/null 2>&1 || true',
+                            'rm -f /tmp/pactum-monitoring.b64 /tmp/pactum-setup-monitoring.sh'
+                        )
+
+                        foreach ($chunk in $chunks) {
+                            $commands += "printf '%s' '$chunk' >> /tmp/pactum-monitoring.b64"
+                        }
+
+                        $commands += @(
+                            'base64 -d /tmp/pactum-monitoring.b64 > /tmp/pactum-setup-monitoring.sh',
+                            'chmod 700 /tmp/pactum-setup-monitoring.sh',
+                            "bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'",
+                            'rm -f /tmp/pactum-monitoring.b64 /tmp/pactum-setup-monitoring.sh'
+                        )
+
+                        $payload = @{
+                            InstanceIds = @($instanceId)
+                            DocumentName = 'AWS-RunShellScript'
+                            Comment = 'Install and configure Pactum monitoring'
+                            Parameters = @{
+                                commands = $commands
+                            }
+                            TimeoutSeconds = 900
+                        }
+
+                        $inputPath = Join-Path $env:TEMP (
+                            'pactum-monitor-' +
+                            [guid]::NewGuid().ToString('N') + '.json'
+                        )
+
+                        try {
+                            [IO.File]::WriteAllText(
+                                $inputPath,
+                                ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$inputPath" `
+                                --query 'Command.CommandId' `
+                                --output text
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Failed to submit monitoring setup through SSM.'
+                            }
+                        }
+                        finally {
+                            Remove-Item $inputPath -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $commandId = "$commandId".Trim()
+                        $finished = $false
+
+                        for ($i = 0; $i -lt 180; $i++) {
+                            Start-Sleep -Seconds 5
+
+                            $status = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query Status `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                continue
+                            }
+
+                            $status = "$status".Trim()
+
+                            if ($status -eq 'Success') {
+                                $finished = $true
+                                break
+                            }
+
+                            if ($status -in @('Failed', 'Cancelled', 'TimedOut')) {
+                                break
+                            }
+                        }
+
+                        $stdout = & aws ssm get-command-invocation `
+                            --region $env:AWS_REGION `
+                            --command-id $commandId `
+                            --instance-id $instanceId `
+                            --query StandardOutputContent `
+                            --output text 2>&1
+
+                        if ($stdout) {
+                            Write-Host $stdout
+                        }
+
+                        if (-not $finished) {
+                            $stderr = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardErrorContent `
+                                --output text 2>&1
+
+                            throw "Monitoring setup failed. SSM stderr: $stderr"
+                        }
+
+                        Write-Host 'Monitoring setup completed successfully.'
+                    '''
+                }
+            }
+        }
+
+
+        stage('Verify Monitoring Services') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+                        $instanceId = $env:PACTUM_MONITORING_INSTANCE_ID
+
+                        if (-not $instanceId) {
+                            throw 'PACTUM_MONITORING_INSTANCE_ID is missing.'
+                        }
+
+                        $online = $false
+
+                        for ($i = 0; $i -lt 60; $i++) {
+                            $status = & aws ssm describe-instance-information `
+                                --region $env:AWS_REGION `
+                                --filters "Key=InstanceIds,Values=$instanceId" `
+                                --query "InstanceInformationList[0].PingStatus" `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -eq 0 -and
+                                "$status".Trim() -eq 'Online') {
+                                $online = $true
+                                break
+                            }
+
+                            Start-Sleep -Seconds 10
+                        }
+
+                        if (-not $online) {
+                            throw "Monitoring instance $instanceId did not become available in SSM."
+                        }
+
+                        $remoteCommand = @'
+sudo cloud-init status --wait &&
+test "$(sudo docker inspect -f '{{.State.Running}}' prometheus)" = true &&
+test "$(sudo docker inspect -f '{{.State.Running}}' grafana)" = true &&
+echo MONITORING_READY
+'@
+
+                        $payload = @{
+                            InstanceIds = @($instanceId)
+                            DocumentName = 'AWS-RunShellScript'
+                            Comment = 'Verify Pactum Prometheus and Grafana'
+                            Parameters = @{
+                                commands = @($remoteCommand)
+                            }
+                            TimeoutSeconds = 900
+                        }
+
+                        $path = Join-Path $env:TEMP (
+                            'pactum-monitor-check-' +
+                            [guid]::NewGuid().ToString('N') + '.json'
+                        )
+
+                        try {
+                            [IO.File]::WriteAllText(
+                                $path,
+                                ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$path" `
+                                --query 'Command.CommandId' `
+                                --output text
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Could not submit monitoring verification command.'
+                            }
+                        }
+                        finally {
+                            Remove-Item $path -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $commandId = "$commandId".Trim()
+                        $finished = $false
+
+                        for ($i = 0; $i -lt 180; $i++) {
+                            Start-Sleep -Seconds 5
+
+                            $status = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query Status `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                continue
+                            }
+
+                            $status = "$status".Trim()
+
+                            if ($status -eq 'Success') {
+                                $finished = $true
+                                break
+                            }
+
+                            if ($status -in @(
+                                'Failed', 'Cancelled', 'TimedOut'
+                            )) {
+                                break
+                            }
+                        }
+
+                        $stdout = & aws ssm get-command-invocation `
+                            --region $env:AWS_REGION `
+                            --command-id $commandId `
+                            --instance-id $instanceId `
+                            --query StandardOutputContent `
+                            --output text 2>&1
+
+                        if ($stdout) {
+                            Write-Host $stdout
+                        }
+
+                        if (-not $finished -or
+                            "$stdout" -notmatch 'MONITORING_READY') {
+                            $stderr = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardErrorContent `
+                                --output text 2>&1
+
+                            throw "Monitoring services did not become ready: $stderr"
+                        }
+
+                        Write-Host 'Prometheus and Grafana are running.'
+                    '''
+                }
+            }
+        }
+
 
         stage('Deploy Django Backend') {
             steps {
