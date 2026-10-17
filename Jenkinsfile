@@ -629,7 +629,10 @@ echo "Node Exporter is running on port 9100."
                             'set -e',
                             'base64 -d /tmp/pactum-monitoring.b64 > /tmp/pactum-setup-monitoring.sh',
                             'chmod 700 /tmp/pactum-setup-monitoring.sh',
-                            "bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'",
+                            'command -v bash',
+                            '/bin/bash --version',
+                            '/bin/bash -n /tmp/pactum-setup-monitoring.sh',
+                            "/bin/bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'",
                             'rm -f /tmp/pactum-monitoring.b64 /tmp/pactum-setup-monitoring.sh'
                         )
 
