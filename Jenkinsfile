@@ -612,7 +612,7 @@ echo "Node Exporter is running on port 9100."
 
                         # Encode the script and split it into shell-safe chunks.
                         $encoded = [Convert]::ToBase64String(
-                            [IO.File]::ReadAllBytes($scriptPath)
+                            [System.Text.Encoding]::UTF8.GetBytes($scriptContent)
                         )
 
                         $chunks = @()
