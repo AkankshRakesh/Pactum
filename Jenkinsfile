@@ -565,11 +565,21 @@ echo "Node Exporter is running on port 9100."
                             }
                         }
 
-                        $scriptPath = "bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'"
+                        $scriptPath = 'infra/scripts/setup-monitoring.sh'
 
                         if (-not (Test-Path $scriptPath)) {
-                            throw "Missing monitoring script: $scriptPath"
+                            throw "Missing monitoring script in Jenkins workspace: $scriptPath"
                         }
+
+                        $scriptContent = Get-Content -Path $scriptPath -Raw
+
+                        $encodedScript = [Convert]::ToBase64String(
+                            [System.Text.Encoding]::UTF8.GetBytes($scriptContent)
+                        )
+
+                        # Use this command only after uploading and decoding the script on the EC2 instance.
+                        $remoteScriptPath = '/tmp/pactum-setup-monitoring.sh'
+                        $remoteExecutionCommand = "bash $remoteScriptPath '$($ips[0])' '$($ips[1])'"
 
                         # Wait for the monitoring instance to become SSM Online.
                         $online = $false
@@ -616,6 +626,7 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         $commands += @(
+                            'set -e',
                             'base64 -d /tmp/pactum-monitoring.b64 > /tmp/pactum-setup-monitoring.sh',
                             'chmod 700 /tmp/pactum-setup-monitoring.sh',
                             "bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'",
