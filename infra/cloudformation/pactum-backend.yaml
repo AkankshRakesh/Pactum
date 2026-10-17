@@ -331,7 +331,22 @@ Resources:
           export DEBIAN_FRONTEND=noninteractive
 
           apt-get update
-          apt-get install -y docker.io awscli jq ca-certificates curl
+          apt-get install -y docker.io jq ca-certificates curl python3 python3-pip
+
+          systemctl enable --now docker
+
+          # Install AWS CLI v2 using the official AWS installer.
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+            -o /tmp/awscliv2.zip
+
+          python3 -m zipfile -e /tmp/awscliv2.zip /tmp/awscliv2
+
+          sudo /tmp/awscliv2/aws/install
+
+          rm -rf /tmp/awscliv2 /tmp/awscliv2.zip
+
+          aws --version
+          docker --version
 
           systemctl enable --now docker
 
