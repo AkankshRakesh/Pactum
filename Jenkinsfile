@@ -565,17 +565,23 @@ echo "Node Exporter is running on port 9100."
                             }
                         }
 
+                        
                         $scriptPath = 'infra/scripts/setup-monitoring.sh'
 
                         if (-not (Test-Path $scriptPath)) {
-                            throw "Missing monitoring script in Jenkins workspace: $scriptPath"
+                            throw "Missing monitoring script: $scriptPath"
                         }
 
+                        # Read the script and normalize Windows CRLF/CR to Linux LF.
                         $scriptContent = Get-Content -Path $scriptPath -Raw
+                        $scriptContent = $scriptContent -replace "`r`n", "`n"
+                        $scriptContent = $scriptContent -replace "`r", "`n"
 
+                        # Encode the normalized script for transfer through SSM.
                         $encodedScript = [Convert]::ToBase64String(
                             [System.Text.Encoding]::UTF8.GetBytes($scriptContent)
                         )
+
 
                         # Use this command only after uploading and decoding the script on the EC2 instance.
                         $remoteScriptPath = '/tmp/pactum-setup-monitoring.sh'
