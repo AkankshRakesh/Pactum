@@ -271,6 +271,9 @@ pipeline {
                             }
 
                             $commands = @(
+                                'bash --version',
+                                'head -n 3 /tmp/pactum-setup-monitoring.sh',
+                                'command -v bash',
                                 'sudo /usr/local/bin/k3s kubectl get nodes',
                                 'sudo systemctl is-active k3s'
                             )
@@ -562,9 +565,7 @@ echo "Node Exporter is running on port 9100."
                             }
                         }
 
-                        $scriptPath = Join-Path `
-                            $env:WORKSPACE `
-                            'infra/scripts/setup-monitoring.sh'
+                        $scriptPath = "bash /tmp/pactum-setup-monitoring.sh '$($ips[0])' '$($ips[1])'"
 
                         if (-not (Test-Path $scriptPath)) {
                             throw "Missing monitoring script: $scriptPath"
