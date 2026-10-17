@@ -149,7 +149,9 @@ pipeline {
                                     --stack-name $env:STACK_NAME `
                                     --template-file infra/cloudformation/pactum-backend.yaml `
                                     --capabilities CAPABILITY_NAMED_IAM `
-                                    --parameter-overrides "InstanceType=$env:INSTANCE_TYPE" `
+                                    --parameter-overrides `
+                                        "InstanceType=$env:INSTANCE_TYPE" `
+                                        "MonitoringInstanceType=$env:MONITORING_INSTANCE_TYPE" `
                                     --no-fail-on-empty-changeset
 
                                 if ($LASTEXITCODE -ne 0) {
@@ -173,13 +175,15 @@ pipeline {
 
                                 if (-not $outputs.InstanceIds -or
                                     -not $outputs.LoadBalancerDNS -or
-                                    -not $outputs.InstancePrivateIps) {
-                                    throw 'Missing InstanceIds, LoadBalancerDNS, or InstancePrivateIps CloudFormation output.'
+                                    -not $outputs.InstancePrivateIps -or
+                                    -not $outputs.MonitoringInstanceId) {
+                                    throw 'Missing required CloudFormation outputs.'
                                 }
 
                                 Write-Output "INSTANCE_IDS=$($outputs.InstanceIds)"
                                 Write-Output "ALB_DNS=$($outputs.LoadBalancerDNS)"
                                 Write-Output "INSTANCE_PRIVATE_IPS=$($outputs.InstancePrivateIps)"
+                                Write-Output "MONITORING_INSTANCE_ID=$($outputs.MonitoringInstanceId)"
                             '''
                         ).trim()
 
@@ -197,6 +201,18 @@ pipeline {
                             error("Could not parse CloudFormation outputs: ${result}")
                         }
 
+                        def monitoringLine = result.readLines().find {
+                            it.startsWith('MONITORING_INSTANCE_ID=')
+                        }
+
+                        if (!monitoringLine) {
+                            error("Could not parse MonitoringInstanceId from CloudFormation outputs: ${result}")
+                        }
+
+                        env.PACTUM_MONITORING_INSTANCE_ID =
+                            monitoringLine.substring('MONITORING_INSTANCE_ID='.length())
+
+
                         env.PACTUM_INSTANCE_IDS =
                             instanceIdsLine.substring('INSTANCE_IDS='.length())
                         env.PACTUM_ALB_DNS =
@@ -204,6 +220,7 @@ pipeline {
                         env.PACTUM_PRIVATE_IPS =
                             privateIpsLine.substring('INSTANCE_PRIVATE_IPS='.length())
 
+                        echo "Monitoring EC2 instance: ${env.PACTUM_MONITORING_INSTANCE_ID}"
                         echo "EC2 instances: ${env.PACTUM_INSTANCE_IDS}"
                         echo "Private IPs: ${env.PACTUM_PRIVATE_IPS}"
                         echo "ALB: http://${env.PACTUM_ALB_DNS}"
@@ -320,6 +337,323 @@ pipeline {
                             }
 
                             Write-Host "SSM and k3s ready on $instanceId"
+                        }
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Monitoring Services') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+                        $instanceId = $env:PACTUM_MONITORING_INSTANCE_ID
+
+                        if (-not $instanceId) {
+                            throw 'PACTUM_MONITORING_INSTANCE_ID is missing.'
+                        }
+
+                        $online = $false
+
+                        for ($i = 0; $i -lt 60; $i++) {
+                            $status = & aws ssm describe-instance-information `
+                                --region $env:AWS_REGION `
+                                --filters "Key=InstanceIds,Values=$instanceId" `
+                                --query "InstanceInformationList[0].PingStatus" `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -eq 0 -and
+                                "$status".Trim() -eq 'Online') {
+                                $online = $true
+                                break
+                            }
+
+                            Start-Sleep -Seconds 10
+                        }
+
+                        if (-not $online) {
+                            throw "Monitoring instance $instanceId did not become available in SSM."
+                        }
+
+                        $remoteCommand = @'
+sudo cloud-init status --wait &&
+test "$(sudo docker inspect -f '{{.State.Running}}' prometheus)" = true &&
+test "$(sudo docker inspect -f '{{.State.Running}}' grafana)" = true &&
+echo MONITORING_READY
+'@
+
+                        $payload = @{
+                            InstanceIds = @($instanceId)
+                            DocumentName = 'AWS-RunShellScript'
+                            Comment = 'Verify Pactum Prometheus and Grafana'
+                            Parameters = @{
+                                commands = @($remoteCommand)
+                            }
+                            TimeoutSeconds = 900
+                        }
+
+                        $path = Join-Path $env:TEMP (
+                            'pactum-monitor-check-' +
+                            [guid]::NewGuid().ToString('N') + '.json'
+                        )
+
+                        try {
+                            [IO.File]::WriteAllText(
+                                $path,
+                                ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$path" `
+                                --query 'Command.CommandId' `
+                                --output text
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Could not submit monitoring verification command.'
+                            }
+                        }
+                        finally {
+                            Remove-Item $path -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $commandId = "$commandId".Trim()
+                        $finished = $false
+
+                        for ($i = 0; $i -lt 180; $i++) {
+                            Start-Sleep -Seconds 5
+
+                            $status = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query Status `
+                                --output text 2>&1
+
+                            if ($LASTEXITCODE -ne 0) {
+                                continue
+                            }
+
+                            $status = "$status".Trim()
+
+                            if ($status -eq 'Success') {
+                                $finished = $true
+                                break
+                            }
+
+                            if ($status -in @(
+                                'Failed', 'Cancelled', 'TimedOut'
+                            )) {
+                                break
+                            }
+                        }
+
+                        $stdout = & aws ssm get-command-invocation `
+                            --region $env:AWS_REGION `
+                            --command-id $commandId `
+                            --instance-id $instanceId `
+                            --query StandardOutputContent `
+                            --output text 2>&1
+
+                        if ($stdout) {
+                            Write-Host $stdout
+                        }
+
+                        if (-not $finished -or
+                            "$stdout" -notmatch 'MONITORING_READY') {
+                            $stderr = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardErrorContent `
+                                --output text 2>&1
+
+                            throw "Monitoring services did not become ready: $stderr"
+                        }
+
+                        Write-Host 'Prometheus and Grafana are running.'
+                    '''
+                }
+            }
+        }
+
+        stage('Install Node Exporter') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-creds',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+
+                        $instanceIds = @(
+                            $env:PACTUM_INSTANCE_IDS.Split(',') |
+                            ForEach-Object { $_.Trim() } |
+                            Where-Object { $_ }
+                        )
+
+                        if ($instanceIds.Count -ne 2) {
+                            throw "Expected two backend instances; found $($instanceIds.Count)."
+                        }
+
+                        $nodeExporterScript = @'
+set -eu
+
+VERSION="1.9.1"
+ARCH="$(dpkg --print-architecture)"
+
+case "$ARCH" in
+    amd64) NODE_ARCH="amd64" ;;
+    arm64) NODE_ARCH="arm64" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+if ! id node_exporter >/dev/null 2>&1; then
+    sudo useradd --system --no-create-home \
+        --shell /usr/sbin/nologin node_exporter
+fi
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+curl -fsSL \
+    "https://github.com/prometheus/node_exporter/releases/download/v${VERSION}/node_exporter-${VERSION}.linux-${NODE_ARCH}.tar.gz" \
+    -o "$TMP_DIR/node_exporter.tar.gz"
+
+tar -xzf "$TMP_DIR/node_exporter.tar.gz" -C "$TMP_DIR"
+
+sudo install -o root -g root -m 0755 \
+    "$TMP_DIR/node_exporter-${VERSION}.linux-${NODE_ARCH}/node_exporter" \
+    /usr/local/bin/node_exporter
+
+sudo tee /etc/systemd/system/node_exporter.service >/dev/null <<'SERVICE'
+[Unit]
+Description=Prometheus Node Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=:9100
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now node_exporter
+sudo systemctl restart node_exporter
+sudo systemctl is-active --quiet node_exporter
+
+curl -fsS http://127.0.0.1:9100/metrics >/dev/null
+echo "Node Exporter is running on port 9100."
+'@
+
+                        $payload = @{
+                            InstanceIds = $instanceIds
+                            DocumentName = 'AWS-RunShellScript'
+                            Comment = 'Install Prometheus Node Exporter on Pactum backend instances'
+                            Parameters = @{
+                                commands = @($nodeExporterScript)
+                            }
+                            TimeoutSeconds = 300
+                        }
+
+                        $path = Join-Path $env:TEMP (
+                            'pactum-node-exporter-' +
+                            [guid]::NewGuid().ToString('N') + '.json'
+                        )
+
+                        try {
+                            [IO.File]::WriteAllText(
+                                $path,
+                                ($payload | ConvertTo-Json -Depth 8 -Compress),
+                                [System.Text.UTF8Encoding]::new($false)
+                            )
+
+                            $commandId = & aws ssm send-command `
+                                --region $env:AWS_REGION `
+                                --cli-input-json "file://$path" `
+                                --query 'Command.CommandId' `
+                                --output text
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw 'Could not submit Node Exporter installation command.'
+                            }
+                        }
+                        finally {
+                            Remove-Item $path -Force -ErrorAction SilentlyContinue
+                        }
+
+                        $commandId = "$commandId".Trim()
+
+                        foreach ($instanceId in $instanceIds) {
+                            $finished = $false
+
+                            for ($i = 0; $i -lt 60; $i++) {
+                                Start-Sleep -Seconds 5
+
+                                $status = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query Status `
+                                    --output text 2>&1
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    continue
+                                }
+
+                                $status = "$status".Trim()
+
+                                if ($status -eq 'Success') {
+                                    $finished = $true
+                                    break
+                                }
+
+                                if ($status -in @(
+                                    'Failed', 'Cancelled', 'TimedOut'
+                                )) {
+                                    break
+                                }
+                            }
+
+                            $stdout = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardOutputContent `
+                                --output text 2>&1
+
+                            if ($stdout) {
+                                Write-Host "$instanceId`: $stdout"
+                            }
+
+                            if (-not $finished) {
+                                $stderr = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query StandardErrorContent `
+                                    --output text 2>&1
+
+                                throw "Node Exporter installation failed on ${instanceId}: $stderr"
+                            }
                         }
                     '''
                 }

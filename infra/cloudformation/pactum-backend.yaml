@@ -16,6 +16,16 @@ Parameters:
       - t3.large
       - c7i-flex.large
 
+  MonitoringInstanceType:
+    Type: String
+    Description: EC2 instance type for Prometheus and Grafana
+    Default: c7i-flex.large
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - c7i-flex.large
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -101,6 +111,10 @@ Resources:
           FromPort: 30080
           ToPort: 30080
           SourceSecurityGroupId: !Ref AlbSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 9100
+          ToPort: 9100
+          SourceSecurityGroupId: !Ref MonitoringSecurityGroup
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -282,6 +296,179 @@ Resources:
 
           /usr/local/bin/k3s kubectl get nodes
 
+
+  MonitoringInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - PublicRoute
+      - AttachInternetGateway
+    Properties:
+      ImageId: !Ref UbuntuAmiId
+      InstanceType: !Ref MonitoringInstanceType
+      IamInstanceProfile: !Ref MonitoringInstanceProfile
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref MonitoringSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-monitoring"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          exec > >(tee -a /var/log/pactum-monitoring-bootstrap.log) 2>&1
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          apt-get update
+          apt-get install -y docker.io awscli jq ca-certificates curl
+
+          systemctl enable --now docker
+
+          # Retrieve the Grafana password from Secrets Manager.
+          GRAFANA_SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --secret-id '${GrafanaAdminSecret}' \
+            --query SecretString \
+            --output text \
+            --region '${AWS::Region}')"
+
+          GRAFANA_ADMIN_PASSWORD="$(printf '%s' "$GRAFANA_SECRET_JSON" | jq -r '.password')"
+
+          test -n "$GRAFANA_ADMIN_PASSWORD"
+          test "$GRAFANA_ADMIN_PASSWORD" != "null"
+
+          mkdir -p /opt/pactum-monitoring/prometheus
+          mkdir -p /opt/pactum-monitoring/grafana-provisioning/datasources
+
+          # Prometheus host-level metrics targets.
+          cat > /opt/pactum-monitoring/prometheus/prometheus.yml <<'PROMETHEUS_CONFIG'
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          scrape_configs:
+            - job_name: prometheus
+              static_configs:
+                - targets: ["localhost:9090"]
+
+            - job_name: pactum-backend-1
+              static_configs:
+                - targets: ["${BackendInstance.PrivateIp}:9100"]
+
+            - job_name: pactum-backend-2
+              static_configs:
+                - targets: ["${BackendInstance2.PrivateIp}:9100"]
+          PROMETHEUS_CONFIG
+
+          # Automatically configure Grafana's default data source.
+          cat > /opt/pactum-monitoring/grafana-provisioning/datasources/prometheus.yml <<'GRAFANA_DATASOURCE'
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              access: proxy
+              url: http://prometheus:9090
+              isDefault: true
+              editable: false
+          GRAFANA_DATASOURCE
+
+          docker network create pactum-monitoring || true
+
+          docker pull prom/prometheus:v3.5.0
+          docker pull grafana/grafana:12.2.0
+
+          # Recreate containers while preserving their named data volumes.
+          docker rm -f prometheus grafana || true
+
+          docker run -d \
+            --name prometheus \
+            --restart unless-stopped \
+            --network pactum-monitoring \
+            -p 127.0.0.1:9090:9090 \
+            -v /opt/pactum-monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+            -v prometheus-data:/prometheus \
+            prom/prometheus:v3.5.0 \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --storage.tsdb.path=/prometheus \
+            --storage.tsdb.retention.time=15d
+
+          docker run -d \
+            --name grafana \
+            --restart unless-stopped \
+            --network pactum-monitoring \
+            -p 127.0.0.1:3000:3000 \
+            -e GF_SECURITY_ADMIN_USER=admin \
+            -e GF_SECURITY_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+            -e GF_USERS_ALLOW_SIGN_UP=false \
+            -v grafana-data:/var/lib/grafana \
+            -v /opt/pactum-monitoring/grafana-provisioning:/etc/grafana/provisioning:ro \
+            grafana/grafana:12.2.0
+
+          unset GRAFANA_SECRET_JSON GRAFANA_ADMIN_PASSWORD
+
+          docker ps
+
+  MonitoringSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private access for Pactum Prometheus and Grafana monitoring
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-monitoring-sg"
+
+  GrafanaAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/grafana-admin"
+      Description: Administrator credentials for Pactum Grafana
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"admin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  MonitoringInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadGrafanaAdminSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref GrafanaAdminSecret
+
+  MonitoringInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MonitoringInstanceRole
+
 Outputs:
   InstanceId:
     Description: First backend EC2 instance ID
@@ -320,3 +507,11 @@ Outputs:
       - ","
       - - !GetAtt BackendInstance.PrivateIp
         - !GetAtt BackendInstance2.PrivateIp
+  
+  MonitoringInstanceId:
+    Description: EC2 instance running Prometheus and Grafana
+    Value: !Ref MonitoringInstance
+
+  GrafanaAdminSecretArn:
+    Description: Secrets Manager ARN containing Grafana administrator credentials
+    Value: !Ref GrafanaAdminSecret
