@@ -4,7 +4,7 @@ set -Eeuo pipefail
 exec > >(tee -a /var/log/pactum-monitoring-setup.log) 2>&1
 
 REGION="ap-south-1"
-GRAFANA_SECRET_ARN="arn:aws:secretsmanager:ap-south-1:442999092714:secret:pactum-backend/grafana-admin-Hy0f3u"
+GRAFANA_SECRET_ARN="arn:aws:secretsmanager:ap-south-1:442999092714:secret:pactum-backend/grafana-admin-RE7cjF"
 
 PROMETHEUS_IMAGE="prom/prometheus:v3.5.0"
 GRAFANA_IMAGE="grafana/grafana:12.2.0"
