@@ -395,6 +395,10 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref GrafanaAdminSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:pactum-backend/grafana-admin-*'
 
   MonitoringInstanceProfile:
     Type: AWS::IAM::InstanceProfile
