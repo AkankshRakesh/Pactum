@@ -87,11 +87,14 @@ install -d -m 0750 "$ROOT_DIR/prometheus"
 install -d -m 0750 "$ROOT_DIR/grafana-provisioning/datasources"
 install -d -m 0750 "$ROOT_DIR/grafana-provisioning/dashboards"
 install -d -m 0750 "$ROOT_DIR/dashboards"
-install -d -m 0700 "$ROOT_DIR/secrets"
+install -d -m 0750 "$ROOT_DIR/secrets"
 
 printf '%s' "$GRAFANA_ADMIN_PASSWORD" \
     > "$ROOT_DIR/secrets/grafana_admin_password"
-chmod 0600 "$ROOT_DIR/secrets/grafana_admin_password"
+
+chown 472:472 "$ROOT_DIR/secrets/grafana_admin_password"
+chmod 0400 "$ROOT_DIR/secrets/grafana_admin_password"
+
 unset GRAFANA_ADMIN_PASSWORD
 
 # Use the actual backend IPs from CloudFormation outputs.
