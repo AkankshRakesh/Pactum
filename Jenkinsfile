@@ -29,7 +29,8 @@ pipeline {
                         returnStdout: true,
                         script: 'git rev-parse HEAD'
                     ).trim()
-                    env.IMAGE_TAG = env.GIT_COMMIT_FULL.take(12)
+                    
+                    env.IMAGE_TAG = 'latest'
 
                     if (!env.GIT_COMMIT_FULL) {
                         error('Could not determine Git commit SHA.')
@@ -845,6 +846,9 @@ sudo /usr/local/bin/k3s kubectl set env deployment/pactum-backend \
     DJANGO_DEBUG=False
 
 unset SMTP_USER SMTP_USER_B64
+
+sudo /usr/local/bin/k3s kubectl rollout restart \
+    deployment/pactum-backend -n pactum
 
 if ! sudo /usr/local/bin/k3s kubectl -n pactum rollout status \
     deployment/pactum-backend --timeout=300s; then
