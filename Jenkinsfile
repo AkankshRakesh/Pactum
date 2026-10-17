@@ -550,8 +550,15 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         foreach ($ip in $ips) {
-                            if ($ip -notmatch '^(?:\\d{1,3}\\.){3}\\d{1,3}$') {
+                            if ($ip -notmatch '^(?:\d{1,3}\.){3}\d{1,3}$') {
                                 throw "Invalid backend private IP: $ip"
+                            }
+
+                            $octets = $ip.Split('.')
+                            foreach ($octet in $octets) {
+                                if ([int]$octet -gt 255) {
+                                    throw "Invalid backend private IP: $ip"
+                                }
                             }
                         }
 
@@ -598,6 +605,7 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         $commands = @(
+                            'set -e',
                             'cloud-init status --wait >/dev/null 2>&1 || true',
                             'rm -f /tmp/pactum-monitoring.b64 /tmp/pactum-setup-monitoring.sh'
                         )
@@ -678,24 +686,52 @@ echo "Node Exporter is running on port 9100."
                             }
                         }
 
-                        $stdout = & aws ssm get-command-invocation `
-                            --region $env:AWS_REGION `
-                            --command-id $commandId `
-                            --instance-id $instanceId `
-                            --query StandardOutputContent `
-                            --output text 2>&1
+                        $previousErrorActionPreference = $ErrorActionPreference
+                        $ErrorActionPreference = 'Continue'
+
+                        try {
+                            $stdout = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardOutputContent `
+                                --output text 2>&1
+
+                            $stdoutExitCode = $LASTEXITCODE
+                        }
+                        finally {
+                            $ErrorActionPreference = $previousErrorActionPreference
+                        }
+
+                        if ($stdoutExitCode -ne 0) {
+                            throw "Could not retrieve monitoring setup stdout: $stdout"
+                        }
 
                         if ($stdout) {
                             Write-Host $stdout
                         }
 
                         if (-not $finished) {
-                            $stderr = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $instanceId `
-                                --query StandardErrorContent `
-                                --output text 2>&1
+                            $previousErrorActionPreference = $ErrorActionPreference
+                            $ErrorActionPreference = 'Continue'
+
+                            try {
+                                $stderr = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query StandardErrorContent `
+                                    --output text 2>&1
+
+                                $stderrExitCode = $LASTEXITCODE
+                            }
+                            finally {
+                                $ErrorActionPreference = $previousErrorActionPreference
+                            }
+
+                            if ($stderrExitCode -ne 0) {
+                                throw "Monitoring setup failed, and SSM stderr retrieval also failed: $stderr"
+                            }
 
                             throw "Monitoring setup failed. SSM stderr: $stderr"
                         }
@@ -747,36 +783,24 @@ echo "Node Exporter is running on port 9100."
                         }
 
                         $remoteCommand = @'
-set -u
+set -eu
 
-echo "=== Cloud-init ==="
-sudo cloud-init status --wait || true
+echo "Checking Docker service..."
+sudo systemctl is-active --quiet docker
 
-echo "=== Docker service ==="
-sudo systemctl status docker --no-pager || true
+echo "Checking Prometheus container..."
+sudo docker inspect -f '{{.State.Running}}' prometheus | grep -qx true
 
-echo "=== Docker containers ==="
-sudo docker ps -a --no-trunc || true
+echo "Checking Grafana container..."
+sudo docker inspect -f '{{.State.Running}}' grafana | grep -qx true
 
-echo "=== Prometheus container ==="
-sudo docker inspect prometheus 2>&1 || true
-sudo docker logs --tail 100 prometheus 2>&1 || true
+echo "Checking Prometheus readiness..."
+curl -fsS http://127.0.0.1:9090/-/ready >/dev/null
 
-echo "=== Grafana container ==="
-sudo docker inspect grafana 2>&1 || true
-sudo docker logs --tail 100 grafana 2>&1 || true
+echo "Checking Grafana health..."
+curl -fsS http://127.0.0.1:3000/api/health >/dev/null
 
-echo "=== Monitoring setup log ==="
-sudo tail -n 200 /var/log/pactum-monitoring-setup.log 2>&1 || true
-
-echo "=== Bootstrap log ==="
-sudo tail -n 100 /var/log/pactum-monitoring-bootstrap.log 2>&1 || true
-
-echo "=== Health endpoints ==="
-curl -fsS http://127.0.0.1:9090/-/ready || true
-curl -fsS http://127.0.0.1:3000/api/health || true
-
-echo "=== Diagnostic complete ==="
+echo MONITORING_READY
 '@
 
                         $payload = @{
@@ -821,14 +845,26 @@ echo "=== Diagnostic complete ==="
                         for ($i = 0; $i -lt 180; $i++) {
                             Start-Sleep -Seconds 5
 
-                            $status = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $instanceId `
-                                --query Status `
-                                --output text 2>&1
+                            $previousPreference = $ErrorActionPreference
 
-                            if ($LASTEXITCODE -ne 0) {
+                            try {
+                                $ErrorActionPreference = 'Continue'
+
+                                $status = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query Status `
+                                    --output text 2>&1
+
+                                $awsExitCode = $LASTEXITCODE
+                            }
+                            finally {
+                                $ErrorActionPreference = $previousPreference
+                            }
+
+                            if ($awsExitCode -ne 0) {
+                                Write-Host "AWS CLI status query failed; retrying: $status"
                                 continue
                             }
 
@@ -839,34 +875,65 @@ echo "=== Diagnostic complete ==="
                                 break
                             }
 
-                            if ($status -in @(
-                                'Failed', 'Cancelled', 'TimedOut'
-                            )) {
+                            if ($status -in @('Failed', 'Cancelled', 'TimedOut', 'Cancelling')) {
                                 break
                             }
                         }
 
-                        $stdout = & aws ssm get-command-invocation `
-                            --region $env:AWS_REGION `
-                            --command-id $commandId `
-                            --instance-id $instanceId `
-                            --query StandardOutputContent `
-                            --output text 2>&1
+                        $previousPreference = $ErrorActionPreference
+
+                        try {
+                            $ErrorActionPreference = 'Continue'
+
+                            $stdout = & aws ssm get-command-invocation `
+                                --region $env:AWS_REGION `
+                                --command-id $commandId `
+                                --instance-id $instanceId `
+                                --query StandardOutputContent `
+                                --output text 2>&1
+
+                            $awsExitCode = $LASTEXITCODE
+                        }
+                        finally {
+                            $ErrorActionPreference = $previousPreference
+                        }
+
+                        if ($awsExitCode -ne 0) {
+                            throw "Could not retrieve monitoring verification stdout: $stdout"
+                        }
 
                         if ($stdout) {
                             Write-Host $stdout
                         }
 
-                        if (-not $finished -or
-                            "$stdout" -notmatch 'MONITORING_READY') {
-                            $stderr = & aws ssm get-command-invocation `
-                                --region $env:AWS_REGION `
-                                --command-id $commandId `
-                                --instance-id $instanceId `
-                                --query StandardErrorContent `
-                                --output text 2>&1
+                        if ($stdout) {
+                            Write-Host $stdout
+                        }
 
-                            throw "Monitoring services did not become ready: $stderr"
+                        if (-not $finished -or "$stdout" -notmatch 'MONITORING_READY') {
+                            $previousPreference = $ErrorActionPreference
+
+                            try {
+                                $ErrorActionPreference = 'Continue'
+
+                                $stderr = & aws ssm get-command-invocation `
+                                    --region $env:AWS_REGION `
+                                    --command-id $commandId `
+                                    --instance-id $instanceId `
+                                    --query StandardErrorContent `
+                                    --output text 2>&1
+
+                                $awsExitCode = $LASTEXITCODE
+                            }
+                            finally {
+                                $ErrorActionPreference = $previousPreference
+                            }
+
+                            if ($awsExitCode -ne 0) {
+                                throw "Monitoring verification failed; AWS CLI could not retrieve stderr: $stderr"
+                            }
+
+                            throw "Monitoring services did not become ready. SSM stderr: $stderr"
                         }
 
                         Write-Host 'Prometheus and Grafana are running.'
