@@ -119,7 +119,6 @@ pipeline {
                         }
                         finally {
                             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-                            docker logout 2>&1 | Out-Null
                         }
                     '''
                 }
