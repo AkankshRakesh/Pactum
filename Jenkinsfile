@@ -10,8 +10,8 @@ pipeline {
     }
 
     environment {
-        AWS_REGION = 'ap-south-1'
-        AWS_DEFAULT_REGION = 'ap-south-1'
+        AWS_REGION = 'ap-southeast-2'
+        AWS_DEFAULT_REGION = 'ap-southeast-2'
         STACK_NAME = 'pactum-backend'
         INSTANCE_TYPE = 'c7i-flex.large'
         MONITORING_INSTANCE_TYPE = 'c7i-flex.large'
