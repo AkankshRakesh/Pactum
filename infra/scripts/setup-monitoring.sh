@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 exec > >(tee -a /var/log/pactum-monitoring-setup.log) 2>&1
 
-REGION="${AWS_REGION:-ap-south-1}"
+REGION="${AWS_REGION:-ap-southeast-2}"
 GRAFANA_SECRET_ARN="${1:?Usage: $0 <grafana-secret-arn> <backend-ip-1> <backend-ip-2>}"
 
 PROMETHEUS_IMAGE="prom/prometheus:v3.5.0"
