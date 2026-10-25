@@ -58,7 +58,6 @@ def _layout(preheader, badge, heading, body_html):
   <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;">
     <tr><td style="padding:0 4px 18px;">
       <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>
-        <td align="center" width="34" height="34" style="width:34px;height:34px;border:1px solid {BRAND};background:#f1dde0;color:{BRAND};font-family:Georgia,serif;font-size:18px;font-weight:bold;">P</td>
         <td style="padding-left:10px;font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:bold;color:{INK};">Pactum</td>
       </tr></table>
     </td></tr>
