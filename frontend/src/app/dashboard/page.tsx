@@ -110,17 +110,16 @@ function ContractPreview({ bodyHtml }: { bodyHtml?: string }) {
 
 const TEMPLATES_PER_PAGE = 4;
 
-const VIEWS = ["All", "Recently viewed", "Invited", "Shared contracts", "Archived"] as const;
+const VIEWS = ["All", "Invited", "Shared", "Signed"] as const;
 type View = typeof VIEWS[number];
 
 const RECENT_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 const EMPTY_MESSAGES: Record<View, string> = {
   "All": "No contracts yet.",
-  "Recently viewed": "Nothing edited in the last 2 days.",
   "Invited": "No contracts have been invited to your account.",
-  "Shared contracts": "You haven't created any contracts yet.",
-  "Archived": "No signed contracts yet.",
+  "Shared": "You haven't created any contracts yet.",
+  "Signed": "No signed contracts yet.",
 };
 
 type DashboardContract = {
@@ -310,10 +309,9 @@ export default function Dashboard() {
 
   const byView: Record<View, DashboardContract[]> = {
     "All": allContracts,
-    "Recently viewed": allContracts.filter(c => now - c.updatedAt <= RECENT_MS),
     "Invited": invitedContracts,
-    "Shared contracts": savedContracts,
-    "Archived": allContracts.filter(c => c.status === "executed"),
+    "Shared": savedContracts,
+    "Signed": allContracts.filter(c => c.status === "executed"),
   };
 
   const displayedContracts = byView[view]

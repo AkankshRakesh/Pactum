@@ -25,6 +25,8 @@ from html.parser import HTMLParser
 
 from .models import Contract, ContractComment, ContractInvitation
 
+from .emails import send_executed_emails, send_invitation_email
+
 
 @require_GET
 def health(request):
@@ -764,17 +766,7 @@ def contract_invite(request):
         contract.invited_email = email
         contract.save(update_fields=["invited_email", "updated_at"])
         invitation, raw_token = _issue_invitation(contract, email)
-        send_mail(
-            subject=f"You are invited to review {contract.title}",
-            message=(
-                f"{request.user.username} invited you to review a contract on Pactum.\n\n"
-                f"Open this secure link to review and sign: {_invitation_url(raw_token)}\n"
-                "This link expires in 7 days and can be revoked by the creator."
-            ),
-            from_email=None,
-            recipient_list=[email],
-            fail_silently=False,
-        )
+        send_invitation_email(contract, invitation, raw_token, request.user)
     return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}})
 
 
@@ -813,18 +805,7 @@ def contract_send(request):
         contract.save()
 
         invitation, raw_token = _issue_invitation(contract, email)
-
-        send_mail(
-            subject=f"You are invited to review {contract.title}",
-            message=(
-                f"{request.user.username} invited you to review a contract on Pactum.\n\n"
-                f"Open this secure link to review and sign: {_invitation_url(raw_token)}\n"
-                "This link expires in 7 days and can be revoked by the creator."
-            ),
-            from_email=None,
-            recipient_list=[email],
-            fail_silently=False,
-        )
+        send_invitation_email(contract, invitation, raw_token, request.user)
 
     return JsonResponse({"contract": _contract_data(contract), "invitation": {"email": invitation.email, "status": invitation.status}}, status=201)
 
@@ -991,6 +972,7 @@ def invitation_sign(request, token):
         invitation.save(update_fields=["status", "accepted_at", "signed_at", "signer_name", "signer_user", "signature_mode"])
         invitation.contract.status = Contract.Status.EXECUTED
         invitation.contract.save(update_fields=["status", "updated_at"])
+        transaction.on_commit(lambda: send_executed_emails(invitation.contract, invitation))
 
     return JsonResponse({"detail": "Contract signed successfully.", "status": "accepted"})
 
@@ -1020,6 +1002,8 @@ def contract_sign(request, contract_id):
         invitation.save(update_fields=["status", "accepted_at", "signed_at", "signer_name", "signer_user", "signature_mode"])
         contract.status = Contract.Status.EXECUTED
         contract.save(update_fields=["status", "updated_at"])
+        transaction.on_commit(lambda: send_executed_emails(contract, invitation))
+        
     return JsonResponse({"detail": "Contract signed successfully.", "status": "accepted"})
 
 

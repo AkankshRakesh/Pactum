@@ -8,6 +8,21 @@ import { CommentStatusBadge, type CommentStatus } from "../../../components/Comm
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 const DEFAULT_GUEST_NAME = "Guest";
+const P = {
+  bg:           "var(--d-bg)",
+  surface:      "var(--d-surface)",
+  card:         "var(--d-card)",
+  cardHover:    "var(--d-card-hover)",
+  accent:       "var(--d-accent)",
+  accentHover:  "var(--d-accent-hover)",
+  accentMuted:  "var(--d-accent-muted)",
+  accentBorder: "var(--d-accent-border)",
+  text:         "var(--d-text)",
+  textSub:      "var(--d-text-sub)",
+  textMuted:    "var(--d-text-muted)",
+  border:       "var(--d-border)",
+  borderStrong: "var(--d-border-strong)",
+};
 
 type Invitation = { email: string; status: string; expiresAt: string | null; creator: string };
 type Contract = { title: string; subtitle: string; bodyHtml: string; status: string };
@@ -42,7 +57,7 @@ const styles = {
   saveStatus: "text-[10px] text-black/50 dark:text-white/50",
   appActions: "flex items-center gap-2.5",
   primaryButton: "rounded-md border border-transparent bg-[#8b2635] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#a8334a] dark:bg-[#c1445a] dark:hover:bg-[#e0637a]",
-  outlineButton: "w-full rounded-md border border-[#8b2635]/35 bg-transparent px-3.5 py-2.5 text-sm font-semibold text-[#8b2635] hover:bg-[#8b2635]/10 dark:border-[#c1445a]/35 dark:text-[#e0637a]",
+  outlineButton: "w-full rounded-md border border-[#8b2635]/35 bg-transparent px-3.5 py-2.5 text-[13px] font-semibold text-[#8b2635] hover:bg-[#8b2635]/10 dark:border-[#c1445a]/35 dark:text-[#e0637a]",
   editorBar: "flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-black/10 bg-[#faf6f2] px-3 dark:border-white/10 dark:bg-[#160b0c]",
   toolbarGroup: "flex shrink-0 items-center gap-1.5",
   editorTools: "flex shrink-0 items-center gap-1.5",
@@ -62,9 +77,6 @@ const styles = {
   inspectorRule: "-mx-5 my-6 h-px bg-black/10 dark:bg-white/10",
   setting: "flex justify-between gap-2 border-b border-black/10 py-2 text-[11px] text-black/50 dark:border-white/10 dark:text-white/50",
   enabled: "text-[#3c9b68]",
-  modalBackdrop: "fixed inset-0 z-30 grid place-items-center bg-[#0f0708]/55 p-5 backdrop-blur-sm",
-  modal: "w-full max-w-[440px] rounded-xl border border-[#8b2635]/35 bg-[#faf6f2] p-7 shadow-[0_20px_70px_rgba(15,7,8,0.3)] dark:border-[#c1445a]/35 dark:bg-[#160b0c]",
-  modalHeader: "mb-6 flex items-start justify-between",
   closeButton: "border-0 bg-transparent text-2xl text-black/45 hover:text-[#8b2635] dark:text-white/45 dark:hover:text-[#e0637a]",
   formLabel: "mb-1.5 block text-[11px] font-bold",
   formInput: "w-full rounded-md border border-black/10 bg-[#fffdfb] px-3 py-2.5 text-[13px] outline-none focus:border-[#8b2635] focus:ring-4 focus:ring-[#8b2635]/10 dark:border-white/10 dark:bg-[#1b1011] dark:focus:border-[#c1445a] dark:focus:ring-[#c1445a]/10",
@@ -89,7 +101,7 @@ export default function InvitationPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [boxes, setBoxes] = useState<ClauseBox[]>([]);
 
-  const [signOpen, setSignOpen] = useState(false);
+  const [guestOpen, setGuestOpen] = useState(false);
   const [signerName, setSignerName] = useState("");
   const [signing, setSigning] = useState(false);
   const [signed, setSigned] = useState(false);
@@ -148,20 +160,20 @@ export default function InvitationPage() {
 
   // ── overlays: Escape, scroll lock, focus ──────────────────────────
   useEffect(() => {
-    if (!panelOpen && !signOpen && activeClause === null) return;
+    if (!panelOpen && activeClause === null) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") { setPanelOpen(false); setSignOpen(false); setActiveClause(null); }
+      if (event.key === "Escape") { setPanelOpen(false); setActiveClause(null); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, signOpen, activeClause]);
+  }, [panelOpen, activeClause]);
 
   useEffect(() => {
-    if (!panelOpen && !signOpen) return;
+    if (!panelOpen) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previous; };
-  }, [panelOpen, signOpen]);
+  }, [panelOpen]);
 
   useEffect(() => {
     if (activeClause !== null) textareaRef.current?.focus();
@@ -226,6 +238,7 @@ export default function InvitationPage() {
     }
   }
 
+  // "Save contract to account"
   async function claimInvitation() {
     setSigning(true);
     setActionError("");
@@ -233,15 +246,15 @@ export default function InvitationPage() {
       const claimResponse = await fetch(`${API_BASE}/api/invitations/${token}/claim/`, { method: "POST", credentials: "include", headers: { "X-CSRFToken": await csrfToken() } });
       const claimResult = await readResponse(claimResponse);
       if (claimResponse.status === 401) { router.push(`/auth?next=${encodeURIComponent(`/invite/${token}`)}`); return; }
-      if (!claimResponse.ok) throw new Error(typeof claimResult.detail === "string" ? claimResult.detail : `Unable to claim this invitation (${claimResponse.status}).`);
+      if (!claimResponse.ok) throw new Error(typeof claimResult.detail === "string" ? claimResult.detail : `Unable to save this contract to your account (${claimResponse.status}).`);
       router.push("/dashboard");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Unable to claim this invitation.");
+      setActionError(error instanceof Error ? error.message : "Unable to save this contract to your account.");
       setSigning(false);
-      setSignOpen(false);
     }
   }
 
+  // "Sign contract with guest account"
   async function signAsGuest() {
     if (!signerName.trim() || signing) return;
     setActionError("");
@@ -256,12 +269,11 @@ export default function InvitationPage() {
       const result = await readResponse(response);
       if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Unable to sign this contract (${response.status}).`);
       setActiveClause(null);
-      setSignOpen(false);
+      setPanelOpen(false);
       setSigned(true);
       setContract(current => current ? { ...current, status: "executed" } : current);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to sign this contract.");
-      setSignOpen(false);
     } finally {
       setSigning(false);
     }
@@ -281,9 +293,68 @@ export default function InvitationPage() {
     );
   }
 
+  // ── signature block (the two options) ─────────────────────────────
+  const signatureBlock = (
+    <>
+      <p className={styles.eyebrow}>Your signature</p>
+      {editable ? (
+        <>
+          <p className="mb-4 text-xs leading-relaxed text-black/55 dark:text-white/55">
+            This contract was sent to <strong>{invitation.email}</strong>. Add comments to any clause before you sign.
+          </p>
+          <button
+            type="button"
+            disabled={signing}
+            onClick={() => void claimInvitation()}
+            className={`${styles.primaryButton} mb-2.5 w-full py-2.5 text-[13px] disabled:opacity-50`}
+          >
+            {signing ? "Please wait…" : "Save contract to account"}
+          </button>
+          <button
+            type="button"
+            disabled={signing}
+            onClick={() => setGuestOpen(open => !open)}
+            aria-expanded={guestOpen}
+            className={`${styles.outlineButton} disabled:opacity-50`}
+          >
+            Sign contract with guest account
+          </button>
+          {guestOpen && (
+            <div className="mt-4 border-t border-black/10 pt-4 dark:border-white/10">
+              <label className={styles.formLabel} htmlFor="guest-name">Full name</label>
+              <input
+                id="guest-name"
+                value={signerName}
+                onChange={event => setSignerName(event.target.value)}
+                className={`${styles.formInput} mb-3`}
+                placeholder="Your legal name"
+                disabled={signing}
+              />
+              <button
+                type="button"
+                disabled={signing || !signerName.trim()}
+                onClick={() => void signAsGuest()}
+                className={`${styles.primaryButton} w-full py-2.5 text-[13px] disabled:opacity-50`}
+              >
+                {signing ? "Signing…" : "Confirm guest signature"}
+              </button>
+            </div>
+          )}
+          <p className="mt-4 text-[10px] leading-relaxed text-black/40 dark:text-white/40">
+            By signing, you confirm that you reviewed the contract and intend to be legally bound by it.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs leading-relaxed text-black/55 dark:text-white/55">This contract is executed. The document and review history remain readable.</p>
+      )}
+      <div className={styles.inspectorRule} />
+    </>
+  );
+
   // ── sidebar / sheet content (shared) ──────────────────────────────
   const sidePanel = (
     <>
+      {signatureBlock}
       <p className={styles.eyebrow}>Review</p>
       <div className={styles.partyCard}>
         <div className={styles.partyAvatar}>{(invitation.email[0] || "G").toUpperCase()}</div>
@@ -324,8 +395,10 @@ export default function InvitationPage() {
       {/* app bar */}
       <header className={styles.appBar}>
         <div className={styles.brandGroup}>
-          <div className={styles.brandMark}>P</div>
-          <span className={`${styles.brandName} hidden sm:inline`}>Pactum</span>
+          <img src="/logo.png" alt="Pactum logo" style={{ width: 28, height: 28 }} />
+          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: P.text, letterSpacing: "-0.01em" }}>
+            PACTUM
+          </span>
         </div>
         <div className={styles.documentName}>
           <span className="w-full truncate text-center text-sm font-semibold">{contract.title}</span>
@@ -333,8 +406,12 @@ export default function InvitationPage() {
         </div>
         <div className={styles.appActions}>
           {editable && (
-            <button className={`${styles.primaryButton} disabled:opacity-50`} type="button" disabled={signing} onClick={() => setSignOpen(true)}>
-              Sign contract
+            <button
+              className={`${styles.primaryButton} xl:hidden`}
+              type="button"
+              onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); setActiveClause(null); setPanelOpen(true); }}
+            >
+              Open panel
             </button>
           )}
         </div>
@@ -489,57 +566,14 @@ export default function InvitationPage() {
 
       {/* bottom sheet (phones) / slide-over (sm+), hidden at xl where the sidebar shows */}
       {panelOpen && (
-        <div className="fixed inset-0 z-20 xl:hidden" role="dialog" aria-modal="true" aria-label="Review comments">
+        <div className="fixed inset-0 z-20 xl:hidden" role="dialog" aria-modal="true" aria-label="Sign and review comments">
           <div className="absolute inset-0 bg-[#0f0708]/45" onClick={() => setPanelOpen(false)} />
           <div className="absolute inset-x-0 bottom-0 max-h-[75dvh] overflow-y-auto rounded-t-2xl border-t border-black/10 bg-[#faf6f2] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_-12px_40px_rgba(15,7,8,0.25)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[340px] sm:rounded-none sm:border-l sm:border-t-0 dark:border-white/10 dark:bg-[#160b0c]">
             <div className="mb-4 flex items-center">
-              <span className="mx-auto h-1 w-10 rounded-full bg-black/15 sm:hidden dark:bg-white/20" />
+              {/* <span className="mx-auto h-1 w-10 rounded-full bg-black/15 sm:hidden dark:bg-white/20" /> */}
               <button type="button" className={`${styles.closeButton} ml-auto`} onClick={() => setPanelOpen(false)} aria-label="Close panel">×</button>
             </div>
             {sidePanel}
-          </div>
-        </div>
-      )}
-
-      {/* sign modal */}
-      {signOpen && editable && (
-        <div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-label="Sign contract" onClick={() => !signing && setSignOpen(false)}>
-          <div className={styles.modal} onClick={event => event.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <p className={styles.eyebrow}>Your signature</p>
-                <h2 className="pactum-display text-2xl font-bold">Review and sign</h2>
-              </div>
-              <button type="button" className={styles.closeButton} onClick={() => setSignOpen(false)} disabled={signing} aria-label="Close">×</button>
-            </div>
-            <p className="mb-5 text-xs leading-relaxed text-black/55 dark:text-white/55">
-              This contract was sent to <strong>{invitation.email}</strong>. Signing is final. The contract will be executed and can no longer be commented on.
-            </p>
-
-            <button type="button" disabled={signing} onClick={() => void claimInvitation()} className={`${styles.primaryButton} mb-3 w-full py-3 text-sm disabled:opacity-50`}>
-              {signing ? "Please wait…" : "Access with an account"}
-            </button>
-
-            <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-widest text-black/40 dark:text-white/40">
-              <span className="h-px flex-1 bg-black/10 dark:bg-white/10" />or<span className="h-px flex-1 bg-black/10 dark:bg-white/10" />
-            </div>
-
-            <label className={styles.formLabel} htmlFor="guest-name">Full name</label>
-            <input
-              id="guest-name"
-              value={signerName}
-              onChange={event => setSignerName(event.target.value)}
-              className={`${styles.formInput} mb-3`}
-              placeholder="Your legal name"
-              disabled={signing}
-            />
-            <button type="button" disabled={signing || !signerName.trim()} onClick={() => void signAsGuest()} className={`${styles.outlineButton} disabled:opacity-50`}>
-              {signing ? "Signing…" : "Sign as a guest"}
-            </button>
-
-            <p className="mt-5 text-[11px] leading-relaxed text-black/40 dark:text-white/40">
-              By signing, you confirm that you reviewed the contract and intend to be legally bound by it.
-            </p>
           </div>
         </div>
       )}
