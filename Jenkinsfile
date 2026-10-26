@@ -16,8 +16,9 @@ pipeline {
     }
 
     stages {
-        stage('Validate') {
+        stage('Checkout and Validate') {
             steps {
+                checkout scm
                 ps('''
                     foreach ($f in @(
                         'backend/Dockerfile',
@@ -229,12 +230,10 @@ echo "Deployment complete"
     }
 }
 
-// Runs a PowerShell body with the shared helpers below prepended.
 def ps(String body, boolean capture = false) {
     return powershell(returnStdout: capture, script: helpers() + body)
 }
 
-// Shared PowerShell helpers: AWS call wrapper and SSM Run Command runner.
 def helpers() {
     return '''
         $ErrorActionPreference = 'Stop'
