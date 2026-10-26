@@ -5,7 +5,6 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 90, unit: 'MINUTES')
     }
 
@@ -17,7 +16,7 @@ pipeline {
         MONITORING_INSTANCE_TYPE = 'c7i-flex.large'
         K8S_NAMESPACE = 'pactum'
         VERCEL_ORIGIN = 'https://pactum-sable.vercel.app'
-        GITHUB_REPO = 'https://github.com/AkankshRakesh/Pactum.git'
+        GITHUB_REPO = 'https://github.com/AkankshRakesh/Pactum'
     }
 
     stages {
