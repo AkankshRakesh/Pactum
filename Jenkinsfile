@@ -52,9 +52,9 @@ pipeline {
                         'backend/Dockerfile',
                         'backend/requirements.txt',
                         'infra/cloudformation/pactum-backend.yaml',
-                        'deploy/kubernetes/backend-service.yaml',
-                        'deploy/kubernetes/backend-deployment.yaml',
-                        'deploy/kubernetes/django-migration-job.yaml',
+                        'infra/deploy/kubernetes/backend-service.yaml',
+                        'infra/deploy/kubernetes/backend-deployment.yaml',
+                        'infra/deploy/kubernetes/django-migration-job.yaml',
                         'infra/scripts/setup-monitoring.sh'
                     )) {
                         if (-not (Test-Path $path)) {
@@ -1111,27 +1111,27 @@ unset DB_PASSWORD DB_PASSWORD_B64
 unset DJANGO_SECRET_KEY DJANGO_SECRET_KEY_B64
 unset SMTP_PASSWORD SMTP_PASSWORD_B64
 
-grep -q 'BACKEND_IMAGE_PLACEHOLDER' deploy/kubernetes/backend-deployment.yaml
-grep -q 'BACKEND_IMAGE_PLACEHOLDER' deploy/kubernetes/django-migration-job.yaml
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' infra/deploy/kubernetes/backend-deployment.yaml
+grep -q 'BACKEND_IMAGE_PLACEHOLDER' infra/deploy/kubernetes/django-migration-job.yaml
 
 sed -i "s|BACKEND_IMAGE_PLACEHOLDER|$IMAGE|g" \
-    deploy/kubernetes/backend-deployment.yaml \
-    deploy/kubernetes/django-migration-job.yaml
+    infra/deploy/kubernetes/backend-deployment.yaml \
+    infra/deploy/kubernetes/django-migration-job.yaml
 
 ALLOWED_HOSTS="$ALB_DNS,$INSTANCE_PRIVATE_IPS,localhost,127.0.0.1"
-grep -q 'ALLOWED_HOSTS_PLACEHOLDER' deploy/kubernetes/backend-deployment.yaml
+grep -q 'ALLOWED_HOSTS_PLACEHOLDER' infra/deploy/kubernetes/backend-deployment.yaml
 sed -i "s|ALLOWED_HOSTS_PLACEHOLDER|$ALLOWED_HOSTS|g" \
-    deploy/kubernetes/backend-deployment.yaml
+    infra/deploy/kubernetes/backend-deployment.yaml
 
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
-    -f deploy/kubernetes/backend-service.yaml
+    -f infra/deploy/kubernetes/backend-service.yaml
 
 if [ "$RUN_MIGRATIONS" = "true" ]; then
     sudo /usr/local/bin/k3s kubectl -n pactum delete job \
         pactum-migrate --ignore-not-found=true
 
     sudo /usr/local/bin/k3s kubectl apply -n pactum \
-        -f deploy/kubernetes/django-migration-job.yaml
+        -f infra/deploy/kubernetes/django-migration-job.yaml
 
     if ! sudo /usr/local/bin/k3s kubectl wait \
         --namespace pactum \
@@ -1149,7 +1149,7 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
 fi
 
 sudo /usr/local/bin/k3s kubectl apply -n pactum \
-    -f deploy/kubernetes/backend-deployment.yaml
+    -f infra/deploy/kubernetes/backend-deployment.yaml
 
 sudo /usr/local/bin/k3s kubectl set env deployment/pactum-backend \
     -n pactum --from=secret/pactum-smtp-secrets
