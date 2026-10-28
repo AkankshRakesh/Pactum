@@ -10,8 +10,8 @@ pipeline {
     environment {
         AWS_DEFAULT_REGION = 'ap-southeast-2'
         STACK_NAME         = 'pactum-backend'
-        AWS_CREDS          = credentials('aws-creds')    // AWS_CREDS_USR / AWS_CREDS_PSW
-        DOCKERHUB          = credentials('docker-hub')   // DOCKERHUB_USR / DOCKERHUB_PSW
+        AWS_CREDS          = credentials('aws-creds')   
+        DOCKERHUB          = credentials('docker-hub')   
         IMAGE              = "${DOCKERHUB_USR}/pactum-backend:latest"
     }
 
