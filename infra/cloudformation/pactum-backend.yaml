@@ -318,7 +318,6 @@ Resources:
           apt-get install -y docker.io jq ca-certificates curl unzip
           systemctl enable --now docker
 
-          # Ubuntu 24.04 does not have an awscli apt candidate in this environment.
           if ! command -v /usr/local/bin/aws >/dev/null 2>&1; then
               curl -fsSL \
                 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \

@@ -23,24 +23,6 @@ GRAFANA_SECRET_ARN="$1"
 BACKEND_IP_1="$2"
 BACKEND_IP_2="$3"
 
-validate_ipv4() {
-    local ip="$1"
-    local octet
-    local parts
-
-    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
-    IFS='.' read -r -a parts <<< "$ip"
-
-    for octet in "${parts[@]}"; do
-        (( 10#$octet <= 255 )) || return 1
-    done
-}
-
-validate_ipv4 "$BACKEND_IP_1" ||
-    die "Invalid backend IP: $BACKEND_IP_1"
-validate_ipv4 "$BACKEND_IP_2" ||
-    die "Invalid backend IP: $BACKEND_IP_2"
-
 export DEBIAN_FRONTEND=noninteractive
 
 # Wait for first-boot cloud-init to finish before using apt/dpkg.
@@ -97,7 +79,6 @@ chmod 0400 "$ROOT_DIR/secrets/grafana_admin_password"
 
 unset GRAFANA_ADMIN_PASSWORD
 
-# Use the actual backend IPs from CloudFormation outputs.
 cat > "$ROOT_DIR/prometheus/prometheus.yml" <<PROMETHEUS_CONFIG
 global:
   scrape_interval: 15s
