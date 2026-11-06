@@ -100,9 +100,25 @@ Resources:
           FromPort: 9100
           ToPort: 9100
           SourceSecurityGroupId: !Ref MonitoringSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 10255
+          ToPort: 10255
+          SourceSecurityGroupId: !Ref MonitoringSecurityGroup
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
+
+  MonitoringSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private access for Pactum Prometheus and Grafana monitoring
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-monitoring-sg"
 
   Alb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -176,6 +192,38 @@ Resources:
     Properties:
       Roles:
         - !Ref BackendInstanceRole
+
+  MonitoringInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadGrafanaAdminSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref GrafanaAdminSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:pactum-backend/grafana-admin-*'
+
+  MonitoringInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MonitoringInstanceRole
 
   BackendInstance:
     Type: AWS::EC2::Instance
@@ -268,7 +316,7 @@ Resources:
           apt-get install -y curl ca-certificates git
 
           curl -sfL https://get.k3s.io | \
-            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
+            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --kubelet-arg=read-only-port=10255" sh -
 
           systemctl enable --now k3s
 
@@ -335,17 +383,6 @@ Resources:
 
           echo "MONITORING_PREREQUISITES_READY"
 
-  MonitoringSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Private access for Pactum Prometheus and Grafana monitoring
-      VpcId: !Ref VPC
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-monitoring-sg"
 
   GrafanaAdminSecret:
     Type: AWS::SecretsManager::Secret
@@ -357,38 +394,6 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
-
-  MonitoringInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      Policies:
-        - PolicyName: ReadGrafanaAdminSecret
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref GrafanaAdminSecret
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:pactum-backend/grafana-admin-*'
-
-  MonitoringInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref MonitoringInstanceRole
 
 Outputs:
   InstanceIds:
