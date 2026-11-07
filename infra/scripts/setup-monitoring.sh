@@ -92,20 +92,32 @@ scrape_configs:
   - job_name: pactum-backend-1
     static_configs:
       - targets: ["${BACKEND_IP_1}:9100"]
+        labels:
+          ec2: backend-1
+            az: A
 
   - job_name: pactum-backend-2
     static_configs:
       - targets: ["${BACKEND_IP_2}:9100"]
+        labels:
+          ec2: backend-2
+          az: B
 
   - job_name: pactum-pods-1
     metrics_path: /metrics/cadvisor
     static_configs:
       - targets: ["${BACKEND_IP_1}:10255"]
+        labels:
+          ec2: backend-1
+          az: A
 
   - job_name: pactum-pods-2
     metrics_path: /metrics/cadvisor
     static_configs:
       - targets: ["${BACKEND_IP_2}:10255"]
+        labels:
+          ec2: backend-2
+          az: B
 PROMETHEUS_CONFIG
 
 # Automatically configure the Grafana Prometheus datasource.
@@ -224,8 +236,8 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
       "targets": [
         {
-          "expr": "sum by (instance, pod) (rate(container_cpu_usage_seconds_total{namespace=\"pactum\", container!=\"\", container!=\"POD\"}[5m]))",
-          "legendFormat": "{{pod}} ({{instance}})",
+          "expr": "sum by (ec2, pod) (rate(container_cpu_usage_seconds_total{namespace=\"pactum\", container!=\"\", container!=\"POD\"}[5m]))",
+          "legendFormat": "{{pod}} ({{ec2}})",
           "refId": "A"
         }
       ],
@@ -240,8 +252,24 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
       "targets": [
         {
-          "expr": "sum by (instance, pod) (container_memory_working_set_bytes{namespace=\"pactum\", container!=\"\", container!=\"POD\"})",
-          "legendFormat": "{{pod}} ({{instance}})",
+          "expr": "sum by (ec2, pod) (container_memory_working_set_bytes{namespace=\"pactum\", container!=\"\", container!=\"POD\"})",
+          "legendFormat": "{{pod}} ({{ec2}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Pod Network",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
+      "targets": [
+        {
+          "expr": "sum by (ec2, pod) (rate(container_network_receive_bytes_total{namespace=\"pactum\", container!=\"\", container!=\"POD\"}[5m]))",
+          "legendFormat": "{{pod}} ({{ec2}})",
           "refId": "A"
         }
       ],
