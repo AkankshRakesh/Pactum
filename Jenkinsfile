@@ -146,7 +146,7 @@ echo "node_exporter running on :9100"
                     $text = (Get-Content 'infra/scripts/setup-monitoring.sh' -Raw) -replace "`r`n", "`n"
                     $b64  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text))
 
-                    # Ship the script as base64 chunks, rebuild it on the instance, run it with bash.
+
                     $cmds  = @('cloud-init status --wait >/dev/null 2>&1 || true', 'rm -f /tmp/mon.b64')
                     $cmds += [regex]::Matches($b64, '.{1,3000}') | ForEach-Object { "printf '%s' '$($_.Value)' >> /tmp/mon.b64" }
                     $cmds += 'base64 -d /tmp/mon.b64 > /tmp/mon.sh'

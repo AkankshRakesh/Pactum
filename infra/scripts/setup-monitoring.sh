@@ -94,7 +94,7 @@ scrape_configs:
       - targets: ["${BACKEND_IP_1}:9100"]
         labels:
           ec2: backend-1
-            az: A
+          az: A
 
   - job_name: pactum-backend-2
     static_configs:
@@ -170,8 +170,8 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
       "targets": [
         {
-          "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
-          "legendFormat": "{{instance}}",
+          "expr": "100 * (1 - avg by (ec2) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+          "legendFormat": "{{ec2}}",
           "refId": "A"
         }
       ],
@@ -193,7 +193,7 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "targets": [
         {
           "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "{{ec2}}",
           "refId": "A"
         }
       ],
@@ -214,7 +214,7 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
       "targets": [
         {
-          "expr": "up{job=~\"pactum-backend-.*\"}",
+          "expr": "up{job=~\"pactum-(backend|pods)-.*\"}",
           "legendFormat": "{{job}} ({{instance}})",
           "refId": "A"
         }
@@ -268,7 +268,7 @@ cat > "$ROOT_DIR/dashboards/pactum-node-overview.json" <<'DASHBOARD'
       "datasource": {"type": "prometheus", "uid": "pactum-prometheus"},
       "targets": [
         {
-          "expr": "sum by (ec2, pod) (rate(container_network_receive_bytes_total{namespace=\"pactum\", container!=\"\", container!=\"POD\"}[5m]))",
+          "expr": "sum by (ec2, pod) (rate(container_network_receive_bytes_total{namespace=\"pactum\"}[5m]))",
           "legendFormat": "{{pod}} ({{ec2}})",
           "refId": "A"
         }
