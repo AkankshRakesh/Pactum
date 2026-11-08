@@ -262,13 +262,18 @@ Resources:
           apt-get update
           apt-get install -y curl ca-certificates git
 
-          # Install k3s
-          curl -sfL https://get.k3s.io | \
-            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
+          # k3s config: readable kubeconfig + kubelet metrics port for Prometheus
+          mkdir -p /etc/rancher/k3s
+          cat > /etc/rancher/k3s/config.yaml <<'EOF'
+          write-kubeconfig-mode: "644"
+          kubelet-arg:
+            - "read-only-port=10255"
+          EOF
+
+          curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server" sh -
 
           systemctl enable --now k3s
 
-          # Verify Kubernetes is ready
           for i in $(seq 1 60); do
             if /usr/local/bin/k3s kubectl get nodes >/dev/null 2>&1; then
               break
@@ -315,8 +320,15 @@ Resources:
           apt-get update
           apt-get install -y curl ca-certificates git
 
-          curl -sfL https://get.k3s.io | \
-            INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --kubelet-arg=read-only-port=10255" sh -
+          # k3s config: readable kubeconfig + kubelet metrics port for Prometheus
+          mkdir -p /etc/rancher/k3s
+          cat > /etc/rancher/k3s/config.yaml <<'EOF'
+          write-kubeconfig-mode: "644"
+          kubelet-arg:
+            - "read-only-port=10255"
+          EOF
+
+          curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server" sh -
 
           systemctl enable --now k3s
 
