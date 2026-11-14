@@ -2,41 +2,41 @@ import json
 import hashlib
 import re
 import secrets
-import uuid
 from datetime import timedelta
+from functools import wraps
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from django.contrib.auth import authenticate, get_user_model, login, logout
-from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
-from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
+from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, Q
 from django.http import JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.utils import timezone
-from django.db import transaction
-from django.db.models import Q
-from django.middleware.csrf import get_token
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from html.parser import HTMLParser
-
-from .models import Contract, ContractComment, ContractInvitation
-
 from .emails import send_executed_emails, send_invitation_email
+from .forms import (
+    SignupForm, LoginForm, InviteEmailForm, ContractSaveForm, ContractSendForm,
+    CommentForm, GuestCommentForm, CommentStatusForm, InvitationSignForm,
+    available_username,
+)
+from .models import Contract, ContractComment, ContractInvitation
 
 
 @require_GET
-def health(request):
+def health(_request):
     """Return a lightweight liveness response for load balancer checks."""
     return JsonResponse({"status": "ok"})
 
 
 CLAUSES = [
     {
-        "num": "1.1",  
+        "num": "1.1",
         "head": "Formation of Agreement",
         "body": "Either party may initiate a contract using BindPact's structured template "
                  "engine or custom clause builder. The initiating party (\u201cDrafter\u201d) "
@@ -178,6 +178,18 @@ PREAMBLE_TEXT = (
     "guarantees \u2014 executed in permanent record."
 )
 
+def api_login_required(view_func):
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse(
+                {"detail": "Authentication credentials were not provided."},
+                status=401,
+            )
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
 
 def home(request):
     context = {
@@ -222,17 +234,35 @@ def _google_request(url, data=None, headers=None):
 
 
 def _google_username(email):
-    base = re.sub(r"[^a-zA-Z0-9._-]", "", email.split("@", 1)[0]).strip("._-") or "google-user"
-    base = base[:150]
-    username = base
-    suffix = 1
-    while User.objects.filter(username__iexact=username).exists():
-        suffix_text = f"-{suffix}"
-        username = f"{base[:150 - len(suffix_text)]}{suffix_text}"
-        suffix += 1
-    return username
+    base = re.sub(r"[^a-zA-Z0-9._-]", "", email.split("@", 1)[0]).strip("._-").lower() or "google-user"
+    return available_username(base)
 
 
+def _google_user(profile, email):
+    user = User.objects.filter(email__iexact=email).first()
+    if user:
+        return user
+
+    for attempt in range(3):
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(
+                    username=_google_username(email),
+                    email=email,
+                    first_name=str(profile.get("given_name", ""))[:150],
+                    last_name=str(profile.get("family_name", ""))[:150],
+                )
+        except IntegrityError:
+            user = User.objects.filter(email__iexact=email).first()
+            if user:
+                return user
+            if attempt == 2:
+                raise
+
+    raise RuntimeError("Google user creation failed after retries.")
+
+
+@require_GET
 def google_start(request):
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
         return JsonResponse({"detail": "Google OAuth is not configured."}, status=503)
@@ -251,6 +281,7 @@ def google_start(request):
     return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}")
 
 
+@require_GET
 def google_callback(request):
     state = request.GET.get("state", "")
     expected_state = request.session.pop("google_oauth_state", "")
@@ -291,14 +322,9 @@ def google_callback(request):
     if not email or not email_verified or not profile.get("sub"):
         return _google_error_redirect("unverified_google_email")
 
-    user = User.objects.filter(email__iexact=email).first()
-    if user is None:
-        user = User.objects.create_user(
-            username=_google_username(email),
-            email=email,
-            first_name=str(profile.get("given_name", ""))[:150],
-            last_name=str(profile.get("family_name", ""))[:150],
-        )
+    user = _google_user(profile, email)
+    if not user.is_active:
+        return _google_error_redirect("google_account_disabled")
 
     login(request, user)
     return redirect(f"{settings.FRONTEND_URL}/dashboard")
@@ -336,36 +362,28 @@ def signup(request):
     if error:
         return error
 
-    username = str(data.get("username", "")).strip()
-    email = str(data.get("email", "")).strip().lower()
-    password = data.get("password", "")
-    password_confirmation = data.get("passwordConfirm", data.get("password_confirm"))
+    form = SignupForm(data)
+    if not form.is_valid():
+        return JsonResponse({"errors": form.error_dict()}, status=400)
 
-    errors = {}
-    if not username:
-        errors["username"] = "Username is required."
-    if not email:
-        errors["email"] = "Email is required."
-    if not isinstance(password, str) or not password:
-        errors["password"] = "Password is required."
-    elif password_confirmation is not None and password != password_confirmation:
-        errors["passwordConfirm"] = "Passwords do not match."
+    username = form.cleaned_data["username"]
+    email = form.cleaned_data["email"]
+    try:
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=form.cleaned_data["password"],
+            )
+    except IntegrityError:
+        if User.objects.filter(username__iexact=username).exists():
+            form.add_error("username", "That username is already in use.")
+        elif User.objects.filter(email__iexact=email).exists():
+            form.add_error("email", "That email is already in use.")
+        else:
+            raise
+        return JsonResponse({"errors": form.error_dict()}, status=400)
 
-    if username and User.objects.filter(username__iexact=username).exists():
-        errors["username"] = "That username is already in use."
-    if email and User.objects.filter(email__iexact=email).exists():
-        errors["email"] = "That email is already in use."
-
-    if password and not errors.get("password"):
-        try:
-            validate_password(password)
-        except ValidationError as validation_error:
-            errors["password"] = list(validation_error.messages)
-
-    if errors:
-        return JsonResponse({"errors": errors}, status=400)
-
-    user = User.objects.create_user(username=username, email=email, password=password)
     login(request, user)
     return JsonResponse({"user": _user_data(user)}, status=201)
 
@@ -376,15 +394,15 @@ def login_view(request):
     if error:
         return error
 
-    identifier = str(data.get("identifier", data.get("username", ""))).strip()
-    password = data.get("password", "")
-    username = identifier
+    form = LoginForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": "Invalid username/email or password."}, status=401)
 
-    if "@" in identifier:
-        matching_user = User.objects.filter(email__iexact=identifier).first()
-        username = matching_user.username if matching_user else identifier
-
-    user = authenticate(request, username=username, password=password)
+    user = authenticate(
+        request,
+        username=form.resolve_username(),
+        password=form.cleaned_data["password"],
+    )
     if user is None:
         return JsonResponse({"detail": "Invalid username/email or password."}, status=401)
 
@@ -404,20 +422,6 @@ def current_user(request):
         return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
 
     return JsonResponse({"user": _user_data(request.user)})
-
-
-def _require_authenticated(request):
-    if not request.user.is_authenticated:
-        return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
-    return None
-
-
-def _clean_document_html(value):
-    html = str(value or "")
-    html = re.sub(r"<\s*(script|style)[^>]*>.*?<\s*/\s*\1\s*>", "", html, flags=re.IGNORECASE | re.DOTALL)
-    html = re.sub(r"\s+on[a-z]+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", html, flags=re.IGNORECASE)
-    html = re.sub(r"(href|src)\s*=\s*(['\"])\s*javascript:[^'\"]*\2", r"\1=\2#\2", html, flags=re.IGNORECASE)
-    return html[:200000]
 
 
 class _TopLevelClauseParser(HTMLParser):
@@ -458,31 +462,6 @@ def _top_level_clause_ids(html):
     return parser.clause_ids
 
 
-def _normalise_clause_ids(html):
-    """Add stable IDs to top-level ordered-list clauses without changing visible text."""
-    seen = set()
-
-    def add_ids(match):
-        opening, content, closing = match.groups()
-
-        def add_id(li_match):
-            tag = li_match.group(0)
-            existing = re.search(r"\bdata-clause-id\s*=\s*([\"'])(.*?)\1", tag, flags=re.IGNORECASE)
-            existing_id = existing.group(2).strip() if existing else ""
-            if existing_id and existing_id not in seen:
-                seen.add(existing_id)
-                return tag
-            if existing:
-                tag = tag[:existing.start()] + tag[existing.end():]
-            clause_id = uuid.uuid4().hex
-            seen.add(clause_id)
-            return tag[:-1] + f' data-clause-id="{clause_id}"' + ">"
-
-        return opening + re.sub(r"<li\b[^>]*>", add_id, content, flags=re.IGNORECASE) + closing
-
-    return re.sub(r"(<ol\b[^>]*>)(.*?)(</ol>)", add_ids, html, flags=re.IGNORECASE | re.DOTALL)
-
-
 def _sync_comment_clause_metadata(contract, previous_ids, current_ids):
     """Delete comments for removed IDs and keep positional indexes current.
 
@@ -517,7 +496,7 @@ def _sync_comment_clause_metadata(contract, previous_ids, current_ids):
 
 
 def _contract_data(contract, include_body=False):
-    invitation = ContractInvitation.objects.filter(contract=contract).first()
+    invitation = getattr(contract, "invitation", None)
     active_invited_email = contract.invited_email if invitation and invitation.status != ContractInvitation.Status.REVOKED else ""
     data = {
         "id": str(contract.id),
@@ -537,8 +516,33 @@ def _contract_data(contract, include_body=False):
     return data
 
 
-def _invitation_url(raw_token):
-    return f"{settings.FRONTEND_URL}/invite/{raw_token}"
+@require_GET
+@api_login_required
+def contract_stats(request):
+    contracts = request.user.contracts.all()
+
+    total = contracts.count()
+
+    avg_comments = (
+        contracts
+        .annotate(comment_count=Count("comments"))
+        .aggregate(avg=Avg("comment_count"))["avg"]
+    )
+
+    by_status = list(
+        contracts
+        .values("status")
+        .annotate(n=Count("id"))
+        .order_by("status")
+    )
+
+    return JsonResponse({
+        "stats": {
+            "total": total,
+            "avg_comments": avg_comments or 0,
+        },
+        "byStatus": by_status,
+    })
 
 
 def _issue_invitation(contract, email):
@@ -599,36 +603,15 @@ def _comment_data(comment):
     }
 
 
-def _comment_inputs(contract, data):
-    body = str(data.get("body", "")).strip()
-    clause_id = str(data.get("clauseId", "")).strip()[:64]
-    quoted_text = str(data.get("quotedText", "")).strip()[:1000]
-    clause_index = data.get("clauseIndex")
-    try:
-        clause_index = int(clause_index) if clause_index is not None else None
-    except (TypeError, ValueError):
-        clause_index = None
-    if not body or len(body) > 2000:
-        return None, "Comment body must be between 1 and 2000 characters."
-    if not clause_id and (clause_index is None or clause_index < 1):
-        return None, "A stable clause ID or legacy clause number is required."
-    if clause_id and not re.search(rf'data-clause-id=["\']{re.escape(clause_id)}["\']', contract.body_html):
-        return None, "That clause no longer exists in this contract."
-    return {
-        "body": body,
-        "clause_id": clause_id,
-        "quoted_text": quoted_text,
-        "clause_index": clause_index,
-    }, None
-
-
 def _reviewable_contract_for_user(request, contract_id):
     if not request.user.is_authenticated:
         return None
     return Contract.objects.filter(
         Q(id=contract_id, creator=request.user) |
         Q(id=contract_id, invitation__invitee_user=request.user)
-    ).select_related("creator", "invitation").first()
+    ).select_related("creator", "invitation").prefetch_related(
+        "comments__author_user"
+    ).first()
 
 
 def _can_add_comments(contract):
@@ -636,60 +619,108 @@ def _can_add_comments(contract):
 
 
 @require_GET
+@api_login_required
 def contract_list(request):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
-    return JsonResponse({"contracts": [_contract_data(contract, include_body=True) for contract in request.user.contracts.all()]})
-
-
-@require_http_methods(["DELETE"])
-def contract_delete(request, contract_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
-    try:
-        contract = request.user.contracts.get(id=contract_id)
-    except (Contract.DoesNotExist, ValueError):
-        return JsonResponse({"detail": "Contract not found."}, status=404)
-
-    contract.delete()
-    return JsonResponse({"deleted": str(contract_id)})
+    contracts = request.user.contracts.select_related("invitation").prefetch_related(
+        "comments__author_user"
+    )
+    return JsonResponse({"contracts": [_contract_data(contract, include_body=True) for contract in contracts]})
 
 
-@require_GET
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@api_login_required
 def contract_detail(request, contract_id):
-    error = _require_authenticated(request)
+    try:
+        contract = request.user.contracts.select_related("invitation").prefetch_related(
+            "comments__author_user"
+        ).get(id=contract_id)
+    except (Contract.DoesNotExist, ValueError):
+        return JsonResponse({"detail": "Contract not found."}, status=404)
+
+    # GET: retrieve contract
+    if request.method == "GET":
+        return JsonResponse({
+            "contract": _contract_data(contract, include_body=True)
+        })
+
+    # DELETE: delete contract
+    if request.method == "DELETE":
+        contract.delete()
+        return JsonResponse({"deleted": str(contract_id)})
+
+    # PUT / PATCH: update contract
+    if contract.status == Contract.Status.EXECUTED:
+        return JsonResponse(
+            {"detail": "Executed contracts cannot be edited."},
+            status=409,
+        )
+
+    data, error = _json_body(request)
     if error:
         return error
 
-    try:
-        contract = request.user.contracts.get(id=contract_id)
-    except (Contract.DoesNotExist, ValueError):
-        return JsonResponse({"detail": "Contract not found."}, status=404)
-    return JsonResponse({"contract": _contract_data(contract, include_body=True)})
+    if request.method == "PATCH":
+        # PATCH updates only supplied fields.
+        data = {
+            "id": str(contract.id),
+            "title": data.get("title", contract.title),
+            "subtitle": data.get("subtitle", contract.subtitle),
+            "bodyHtml": data.get("bodyHtml", contract.body_html),
+        }
+    else:
+        # PUT replaces the editable contract representation.
+        data["id"] = str(contract.id)
+
+    form = ContractSaveForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+
+    title = form.resolved_title(fallback=contract.title)
+    subtitle = form.cleaned_data["subtitle"]
+    body_html = form.cleaned_data["bodyHtml"]
+
+    previous_ids = _top_level_clause_ids(contract.body_html)
+    current_ids = _top_level_clause_ids(body_html)
+
+    with transaction.atomic():
+        contract.title = title
+        contract.subtitle = subtitle
+        contract.body_html = body_html
+        contract.save(
+            update_fields=[
+                "title",
+                "subtitle",
+                "body_html",
+                "updated_at",
+            ]
+        )
+
+        _sync_comment_clause_metadata(
+            contract,
+            previous_ids,
+            current_ids,
+        )
+
+    return JsonResponse({
+        "contract": _contract_data(contract, include_body=True)
+    })
 
 
 @require_GET
+@api_login_required
 def invited_contract_list(request):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     invitations = ContractInvitation.objects.filter(
         invitee_user=request.user,
         status__in=[ContractInvitation.Status.SENT, ContractInvitation.Status.ACCEPTED],
-    ).select_related("contract")
+    ).select_related("contract", "contract__invitation").prefetch_related(
+        "contract__comments__author_user"
+    )
     return JsonResponse({"contracts": [_contract_data(invitation.contract, include_body=True) for invitation in invitations]})
 
 
 @require_GET
+@api_login_required
 def contract_review(request, contract_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
     contract = _reviewable_contract_for_user(request, contract_id)
     if not contract:
         return JsonResponse({"detail": "Contract not found."}, status=404)
@@ -701,19 +732,20 @@ def contract_review(request, contract_id):
 
 
 @require_POST
+@api_login_required
 def contract_save(request):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     data, error = _json_body(request)
     if error:
         return error
 
-    contract_id = data.get("id")
-    title = str(data.get("title", "Untitled contract")).strip()[:200] or "Untitled contract"
-    subtitle = str(data.get("subtitle", "")).strip()[:500]
-    body_html = _normalise_clause_ids(_clean_document_html(data.get("bodyHtml", "")))
+    form = ContractSaveForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+
+    contract_id = form.cleaned_data["id"]
+    title = form.resolved_title()
+    subtitle = form.cleaned_data["subtitle"]
+    body_html = form.cleaned_data["bodyHtml"]
 
     if contract_id:
         try:
@@ -742,11 +774,8 @@ def contract_save(request):
 
 
 @require_POST
+@api_login_required
 def contract_invite(request):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     data, error = _json_body(request)
     if error:
         return error
@@ -756,9 +785,11 @@ def contract_invite(request):
     except (Contract.DoesNotExist, ValueError):
         return JsonResponse({"detail": "Contract not found."}, status=404)
 
-    email = str(data.get("email", "")).strip().lower()
-    if not email or "@" not in email:
-        return JsonResponse({"detail": "A valid invited-party email is required."}, status=400)
+    form = InviteEmailForm(data, user=request.user)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+    email = form.cleaned_data["email"]
+
     if contract.status == Contract.Status.EXECUTED:
         return JsonResponse({"detail": "Executed contracts cannot be re-invited."}, status=409)
 
@@ -771,18 +802,16 @@ def contract_invite(request):
 
 
 @require_POST
+@api_login_required
 def contract_send(request):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     data, error = _json_body(request)
     if error:
         return error
 
-    email = str(data.get("email", "")).strip().lower()
-    if not email or "@" not in email:
-        return JsonResponse({"detail": "A valid invited-party email is required."}, status=400)
+    form = ContractSendForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+    email = form.cleaned_data["email"]
 
     with transaction.atomic():
         contract_id = data.get("contractId")
@@ -796,9 +825,9 @@ def contract_send(request):
         else:
             contract = Contract(creator=request.user)
 
-        contract.title = str(data.get("title", contract.title or "Untitled contract")).strip()[:200] or "Untitled contract"
-        contract.subtitle = str(data.get("subtitle", "")).strip()[:500]
-        contract.body_html = _normalise_clause_ids(_clean_document_html(data.get("bodyHtml", "")))
+        contract.title = form.resolved_title(fallback=contract.title)
+        contract.subtitle = form.cleaned_data["subtitle"]
+        contract.body_html = form.cleaned_data["bodyHtml"]
         contract.invited_email = email
         contract.status = Contract.Status.SENT
         contract.sent_at = timezone.now()
@@ -811,11 +840,8 @@ def contract_send(request):
 
 
 @require_POST
+@api_login_required
 def contract_invitation_revoke(request, contract_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     try:
         contract = request.user.contracts.get(id=contract_id)
         invitation = contract.invitation
@@ -830,11 +856,8 @@ def contract_invitation_revoke(request, contract_id):
 
 
 @require_POST
+@api_login_required
 def invitation_claim(request, token):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     invitation = _get_active_invitation(token)
     if not invitation:
         return JsonResponse({"detail": "This invitation is invalid, expired, or revoked."}, status=404)
@@ -850,7 +873,7 @@ def invitation_claim(request, token):
 
 
 @require_GET
-def invitation_detail(request, token):
+def invitation_detail(_request, token):
     invitation = _get_invitation(token, allow_accepted=True)
     if not invitation:
         return JsonResponse({"detail": "This invitation is invalid, expired, or revoked."}, status=404)
@@ -882,29 +905,23 @@ def invitation_comments(request, token):
     data, error = _json_body(request)
     if error:
         return error
-    author_name = str(data.get("authorName", "")).strip()[:200]
-    if not author_name:
-        return JsonResponse({"detail": "Your name is required to comment as a guest."}, status=400)
-    fields, validation_error = _comment_inputs(invitation.contract, data)
-    if validation_error:
-        return JsonResponse({"detail": validation_error}, status=400)
+
+    form = GuestCommentForm(data, contract=invitation.contract)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+
     comment = ContractComment.objects.create(
         contract=invitation.contract,
         invitation=invitation,
-        clause_index=fields["clause_index"],
-        clause_id=fields["clause_id"],
-        quoted_text=fields["quoted_text"],
-        author_name=author_name,
-        body=fields["body"],
+        author_name=form.cleaned_data["authorName"],
+        **form.comment_fields(),
     )
     return JsonResponse({"comment": _comment_data(comment)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])
+@api_login_required
 def contract_comments(request, contract_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
     contract = _reviewable_contract_for_user(request, contract_id)
     if not contract:
         return JsonResponse({"detail": "Contract not found."}, status=404)
@@ -916,21 +933,20 @@ def contract_comments(request, contract_id):
     data, error = _json_body(request)
     if error:
         return error
-    fields, validation_error = _comment_inputs(contract, data)
-    if validation_error:
-        return JsonResponse({"detail": validation_error}, status=400)
-    invitation = contract.invitation
+
+    form = CommentForm(data, contract=contract)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+
     comment = ContractComment.objects.create(
         contract=contract,
-        invitation=invitation,
+        invitation=contract.invitation,
         author_user=request.user,
         author_name=request.user.get_full_name().strip() or request.user.username,
-        clause_index=fields["clause_index"],
-        clause_id=fields["clause_id"],
-        quoted_text=fields["quoted_text"],
-        body=fields["body"],
+        **form.comment_fields(),
     )
     return JsonResponse({"comment": _comment_data(comment)}, status=201)
+
 
 @csrf_exempt
 @require_POST
@@ -943,9 +959,13 @@ def invitation_sign(request, token):
     if not invitation:
         return JsonResponse({"detail": "This invitation is invalid, expired, or revoked."}, status=404)
 
-    mode = str(data.get("mode", "guest")).strip().lower()
+    form = InvitationSignForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+
+    mode = form.cleaned_data["mode"]
     signer_user = None
-    if mode == "account":
+    if mode == InvitationSignForm.MODE_ACCOUNT:
         if not request.user.is_authenticated:
             return JsonResponse({"detail": "Sign in to sign this contract with your account."}, status=401)
         if request.user.email.strip().lower() != invitation.email.strip().lower():
@@ -954,12 +974,8 @@ def invitation_sign(request, token):
             return JsonResponse({"detail": "Claim this invitation before signing with your account."}, status=409)
         signer_user = request.user
         signer_name = request.user.get_full_name().strip() or request.user.username
-    elif mode == "guest":
-        signer_name = str(data.get("signerName", "")).strip()[:200]
-        if not signer_name:
-            return JsonResponse({"detail": "Your name is required to sign as a guest."}, status=400)
     else:
-        return JsonResponse({"detail": "Invalid signing mode."}, status=400)
+        signer_name = form.cleaned_data["signerName"]
 
     now = timezone.now()
     with transaction.atomic():
@@ -978,10 +994,8 @@ def invitation_sign(request, token):
 
 
 @require_POST
+@api_login_required
 def contract_sign(request, contract_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
     contract = _reviewable_contract_for_user(request, contract_id)
     if not contract or contract.creator_id == request.user.id:
         return JsonResponse({"detail": "Contract not found."}, status=404)
@@ -1003,16 +1017,13 @@ def contract_sign(request, contract_id):
         contract.status = Contract.Status.EXECUTED
         contract.save(update_fields=["status", "updated_at"])
         transaction.on_commit(lambda: send_executed_emails(contract, invitation))
-        
+
     return JsonResponse({"detail": "Contract signed successfully.", "status": "accepted"})
 
 
 @require_POST
+@api_login_required
 def contract_comment_status(request, contract_id, comment_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     try:
         contract = request.user.contracts.get(id=contract_id)   # creator only
     except (Contract.DoesNotExist, ValueError):
@@ -1023,9 +1034,11 @@ def contract_comment_status(request, contract_id, comment_id):
     data, error = _json_body(request)
     if error:
         return error
-    new_status = str(data.get("status", "")).strip().lower()
-    if new_status not in ContractComment.Status.values:
-        return JsonResponse({"detail": "Status must be pending, resolved or rejected."}, status=400)
+
+    form = CommentStatusForm(data)
+    if not form.is_valid():
+        return JsonResponse({"detail": form.first_error()}, status=400)
+    new_status = form.cleaned_data["status"]
 
     try:
         comment = contract.comments.get(id=comment_id)
@@ -1039,11 +1052,8 @@ def contract_comment_status(request, contract_id, comment_id):
 
 
 @require_http_methods(["DELETE"])
+@api_login_required
 def contract_comment_delete(request, contract_id, comment_id):
-    error = _require_authenticated(request)
-    if error:
-        return error
-
     contract = _reviewable_contract_for_user(request, contract_id)
     if not contract:
         return JsonResponse({"detail": "Contract not found."}, status=404)

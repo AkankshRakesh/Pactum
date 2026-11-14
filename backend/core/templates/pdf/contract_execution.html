@@ -1,0 +1,41 @@
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: a4;
+    margin: 2.2cm 2cm 2.4cm 2cm;
+    @frame footer_frame {
+      -pdf-frame-content: footer_content;
+      left: 2cm; width: 17cm; top: 27.3cm; height: 1cm;
+    }
+  }
+  body { font-family: Times-Roman; font-size: 11.5pt; line-height: 1.55; color: #1a0f10; }
+  .brand { font-family: Helvetica-Bold; font-size: 9pt; letter-spacing: 3px; color: #8b2635; }
+  h1 { font-family: Times-Bold; font-size: 24pt; margin: 6px 0 4px; }
+  .sub { color: #6b5d5e; margin: 0 0 6px; }
+  hr { border: 0; border-top: 1px solid #8b2635; margin: 14px 0 18px; }
+  ol { margin-left: 18px; } li { margin-bottom: 9px; }
+  .sig { margin-top: 30px; border: 1px solid #8b2635; padding: 12px 14px; }
+  .sig h2 { font-family: Helvetica-Bold; font-size: 9pt; letter-spacing: 2px; color: #8b2635; margin: 0 0 8px; }
+  .sig td { font-family: Helvetica; font-size: 9pt; padding: 3px 0; vertical-align: top; }
+  .k { color: #6b5d5e; width: 28%; }
+  #footer_content { font-family: Helvetica; font-size: 8pt; color: #6b5d5e; text-align: center; }
+</style>
+</head>
+<body>
+  {{ contract_body|safe }}
+  <div class="sig" keepWithNext="true">
+    <h2>EXECUTION RECORD</h2>
+    <table>
+      <tr><td class="k">Signed by</td><td><b>{{ signer_name }}</b></td></tr>
+      <tr><td class="k">Method</td><td>{{ signature_method }}</td></tr>
+      <tr><td class="k">Signed on</td><td>{{ signed_at }}</td></tr>
+      <tr><td class="k">Created by</td><td>{{ creator_name }}</td></tr>
+      <tr><td class="k">Contract ID</td><td>{{ contract_id }}</td></tr>
+      <tr><td class="k">SHA-256</td><td>{{ fingerprint }}</td></tr>
+    </table>
+  </div>
+  <div id="footer_content">{{ contract_title }} &middot; Page <pdf:pagenumber> of <pdf:pagecount></div>
+</body>
+</html>

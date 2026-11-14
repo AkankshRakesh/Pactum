@@ -65,13 +65,16 @@ CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 7
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://pactum-sable.vercel.app').rstrip('/')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 GOOGLE_REDIRECT_URI = os.environ.get(
     'GOOGLE_REDIRECT_URI',
-    'http://localhost:8081/api/auth/google/callback/',
+    f'{FRONTEND_URL}/backend/api/auth/google/callback/',
 )
 
 ROOT_URLCONF = 'pactum.urls'

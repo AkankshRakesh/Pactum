@@ -254,7 +254,7 @@ export default function Dashboard() {
     const csrfToken = await fetch(`${API_BASE}/api/auth/csrf/`, { credentials: "include" })
       .then(response => response.json())
       .then(result => result.csrfToken as string);
-    const response = await fetch(`${API_BASE}/api/contracts/${id}/delete/`, {
+    const response = await fetch(`${API_BASE}/api/contracts/${id}`, {
       method: "DELETE",
       credentials: "include",
       headers: { "X-CSRFToken": csrfToken },

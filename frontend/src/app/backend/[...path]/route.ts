@@ -17,6 +17,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
   // Django expects trailing slashes. Normalize the upstream path here
   // so Django does not redirect the browser to a different origin path.
   const pathString = path.map(encodeURIComponent).join("/");
+  const isOAuthRoute = pathString === "api/auth/google/start" || pathString === "api/auth/google/callback";
   const upstreamUrl = new URL(
     `/${pathString}${pathString.endsWith("/") ? "" : "/"}`,
     API_ORIGIN
@@ -51,13 +52,13 @@ async function proxy(request: NextRequest, context: RouteContext) {
       ? undefined
       : await request.arrayBuffer();
 
-  // Follow any remaining upstream redirects on the server, not in the browser.
+  // OAuth redirects must reach the browser so it can visit Google and return via this proxy.
   const upstreamResponse = await fetch(upstreamUrl, {
     method,
     headers,
     body,
     cache: "no-store",
-    redirect: "follow",
+    redirect: isOAuthRoute ? "manual" : "follow",
   });
 
   const responseHeaders = new Headers();
@@ -76,6 +77,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
     ) {
       responseHeaders.set(name, value);
     }
+  }
+
+  if (isOAuthRoute) {
+    const location = upstreamResponse.headers.get("location");
+    if (location) responseHeaders.set("location", location);
   }
 
   for (const cookie of upstreamResponse.headers.getSetCookie()) {

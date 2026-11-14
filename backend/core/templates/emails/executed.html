@@ -1,0 +1,16 @@
+{% extends "emails/base.html" %}
+{% block title %}{{ preheader }}{% endblock %}
+{% block preheader %}{{ preheader }}{% endblock %}
+{% block badge %}Contract executed{% endblock %}
+{% block heading %}Signed, sealed and done{% endblock %}
+{% block content %}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 18px;">
+  <tr><td align="center" width="44" height="44" style="width:44px;height:44px;border-radius:22px;background:#e3f3ea;color:#3c9b68;font-size:22px;font-weight:bold;">&#10003;</td></tr>
+</table>
+<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#1a0f10;">{% if is_creator %}<strong>{{ signer_name }}</strong> has signed <strong>{{ contract_title }}</strong>. The contract is now executed and can no longer be edited or commented on.{% else %}Thanks, {{ recipient_name }}. You&rsquo;ve signed <strong>{{ contract_title }}</strong> and the contract is now executed.{% endif %}</p>
+{% include "emails/partials/details.html" with rows=rows %}
+<p style="margin:0 0 14px;font-size:14px;line-height:1.65;color:#6b5d5e;">{% if has_pdf %}A PDF copy of the executed contract is attached to this email. Keep it for your records.{% else %}We couldn&rsquo;t attach the PDF this time. You can still view the contract from your dashboard.{% endif %}</p>
+{% if is_creator %}
+  {% include "emails/partials/button.html" with label="Open dashboard" url=dashboard_url %}
+{% endif %}
+{% endblock %}

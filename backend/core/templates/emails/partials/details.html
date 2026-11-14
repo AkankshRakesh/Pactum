@@ -1,0 +1,14 @@
+{% if rows %}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:22px 0 4px;background:#faf6f2;border-radius:10px;padding:6px 20px;">
+  <tr><td>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+      {% for label, value in rows %}
+      <tr>
+        <td style="padding:10px 0;border-bottom:1px solid #eadfd6;font-size:12px;color:#6b5d5e;text-transform:uppercase;letter-spacing:.08em;width:38%;">{{ label }}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #eadfd6;font-size:14px;color:#1a0f10;font-weight:bold;">{{ value }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </td></tr>
+</table>
+{% endif %}
