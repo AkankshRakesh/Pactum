@@ -71,6 +71,8 @@ Pactum fixes this by giving **contract owners and counterparties a single shared
 4. **Sign**: Once everyone agrees, the contract is signed.
 5. **Keep forever**: The finalised contract remains available to both parties from their dashboards.
 
+
+![ER diagram](image.png)
 ---
 
 ## Tech Stack
@@ -131,11 +133,8 @@ pactum/
 │       ├── components/          # ContractEditor, ContractReview,
 │       │                        #   CommentStatus, TemplateCard, ConfirmDialog...
 │       └── lib/templates.ts     # Template definitions
-├── deploy/kubernetes/           # K8s manifests + monitoring values
-├── infra/                       # CloudFormation, Helm tooling, monitoring setup
-└── scripts/                     # deploy.sh, validate.sh, verify.sh, install-addons.sh, helm-docker.ps1
+├── infra/                       # All deployment related configurations
 ```
-
 ---
 
 ## Getting Started
