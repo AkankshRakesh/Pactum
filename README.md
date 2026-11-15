@@ -213,23 +213,15 @@ For the frontend, `next.config.ts.example` shows how to point the app at the bac
 
 ### Kubernetes
 
-Manifests are in `deploy/kubernetes/`:
+Manifests are in `infra/deploy/kubernetes/`:
 
 | File | Purpose |
 |---|---|
-| `namespace.yaml` | Dedicated namespace |
-| `backend-deployment.yaml`, `backend-service.yaml`, `backend-hpa.yaml` | Django API with autoscaling |
-| `frontend-deployment.yaml`, `frontend-service.yaml`, `frontend-hpa.yaml` | Next.js app with autoscaling |
+| `backend-deployment.yaml`, `backend-service.yaml` | Django API deployment |
 | `django-migration-job.yaml` | Runs database migrations as a Job |
-| `ingress.yaml` | External routing to frontend and backend |
-| `monitoring-values.yaml` | Helm values for the monitoring stack |
-
-Basic flow (see `deploy/kubernetes/README.md` for details):
 
 ```bash
-kubectl apply -f deploy/kubernetes/namespace.yaml
-kubectl apply -f deploy/kubernetes/django-migration-job.yaml
-kubectl apply -f deploy/kubernetes/
+kubectl apply -f infra/deploy/kubernetes/django-migration-job.yaml
 ```
 
 ### AWS
