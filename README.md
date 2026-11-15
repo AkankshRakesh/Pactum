@@ -226,31 +226,14 @@ kubectl apply -f infra/deploy/kubernetes/django-migration-job.yaml
 
 ### AWS
 
-`infra/cloudformation/pactum-backend.yaml` provisions the backend infrastructure on AWS. A Helm/AWS tooling image is provided under `infra/cloudformation/jenkins-tools/helm-aws/` for CI use.
+`infra/cloudformation/pactum-backend.yaml` provisions the backend infrastructure on AWS.
 
-### Helper scripts
-
-| Script | Purpose |
-|---|---|
-| `scripts/validate.sh` | Validate manifests and configuration |
-| `scripts/deploy.sh` | Deploy the application |
-| `scripts/install-addons.sh` | Install cluster add-ons |
-| `scripts/verify.sh` | Verify a deployment is healthy |
-| `scripts/helm-docker.ps1` | Run Helm via Docker on Windows |
 
 ---
 
 ## Monitoring
 
-Run `infra/scripts/setup-monitoring.sh` to install the monitoring stack using `deploy/kubernetes/monitoring-values.yaml`, giving you metrics and dashboards for the backend and frontend workloads.
-
----
-
-## Legal Notice
-
-Pactum is a tool for creating, negotiating and storing agreements. Whether a given electronic contract is legally binding depends on the jurisdiction, the type of contract and applicable e-signature law (for example, the Information Technology Act, 2000 in India, the ESIGN Act and UETA in the United States, or eIDAS in the EU). Certain document types, such as wills or some property transfers, may require additional formalities.
-
-Contract templates are provided for convenience and are not legal advice. Have important agreements reviewed by a qualified lawyer.
+Run `infra/scripts/setup-monitoring.sh` to install the monitoring stack, giving you metrics and dashboards for the backend and frontend workloads.
 
 ---
 
@@ -267,7 +250,3 @@ Contributions are welcome.
 Please run linting (`npm run lint` in `frontend/`) and the backend tests (`python manage.py test` in `backend/`) before submitting.
 
 ---
-
-## License
-
-Add your license here (for example, MIT). If no license is specified, all rights are reserved by the author.
