@@ -4,6 +4,7 @@
 
 Pactum is a consolidated contract platform that brings everyone who is part of an agreement into one place. A contract owner can create a contract from a template (or from scratch), invite the other party, negotiate the wording clause by clause, and sign, all in a few clicks. Once the contract is signed, both parties keep access to the same final version, so neither side is left relying on a lost email attachment or a "he said, she said" dispute.
 
+![Home page](home.png)
 ---
 
 ## Table of Contents
