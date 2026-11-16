@@ -6,6 +6,7 @@ import ContractLoader from "../ContractLoader";
 import { useConfirm } from "../../components/ConfirmDialog";
 import TemplateCard from "../../components/TemplateCard";
 import { templates } from "../../lib/templates";
+import Link from "next/link";
 
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
@@ -343,12 +344,14 @@ export default function Dashboard() {
           borderBottom: `1px solid ${P.border}`,
         }}>
           {/* wordmark */}
+          <Link href="/" style={{ textDecoration: "none" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, order: 1 }}>
           <img src="/logo.png" alt="Pactum logo" style={{ width: 28, height: 28 }} />
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 16, fontWeight: 700, color: P.text, letterSpacing: "-0.01em" }}>
             PACTUM
           </span>
         </div>
+        </Link>
 
         {/* search */}
          <div style={{
