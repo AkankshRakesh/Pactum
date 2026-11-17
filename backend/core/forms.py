@@ -1,28 +1,3 @@
-"""
-Validation layer for the BindPact JSON API.
-
-These are plain Django ``Form`` classes that you feed a parsed JSON dict
-(``_json_body(request)``) instead of ``request.POST``. Views keep doing the
-things that need the database *state* (ownership lookups, "already executed"
-checks, auth checks) and delegate input validation/normalisation to forms.
-
-Typical usage in a view:
-
-    form = SignupForm(data)
-    if not form.is_valid():
-        return JsonResponse({"errors": form.error_dict()}, status=400)
-    user = User.objects.create_user(
-        username=form.cleaned_data["username"],
-        email=form.cleaned_data["email"],
-        password=form.cleaned_data["password"],
-    )
-
-For endpoints that return a single ``{"detail": ...}`` message:
-
-    form = InviteEmailForm(data)
-    if not form.is_valid():
-        return JsonResponse({"detail": form.first_error()}, status=400)
-"""
 import re
 import uuid
 
@@ -185,8 +160,8 @@ class LoginForm(APIForm):
     """Normalises login input. Authentication itself still happens in the view
     so a bad login always yields the same generic 401."""
 
-    identifier = forms.CharField(required=False)
-    password = forms.CharField(required=False, strip=False)
+    identifier = forms.CharField(required=False, max_length=150)
+    password = forms.CharField(required=False, strip=False, max_length=128)
 
     def __init__(self, data=None, *args, **kwargs):
         if data is not None:
@@ -242,9 +217,9 @@ class InviteEmailForm(APIForm):
 
 
 class ContractContentForm(APIForm):
-    title = forms.CharField(required=False)
-    subtitle = forms.CharField(required=False)
-    bodyHtml = forms.CharField(required=False, strip=False)
+    title = forms.CharField(required=False, max_length=300)
+    subtitle = forms.CharField(required=False, max_length=300)
+    bodyHtml = forms.CharField(required=False, strip=False, max_length=300000)
 
     def clean_title(self):
         return (self.cleaned_data.get("title") or "").strip()[:200]
@@ -267,7 +242,7 @@ class ContractSaveForm(ContractContentForm):
     """Used by contract_save. ``id`` is left as a raw string; the view's
     ``request.user.contracts.get(id=...)`` still produces the 404."""
 
-    id = forms.CharField(required=False)
+    id = forms.CharField(required=False, max_length=100)
 
 
 class ContractSendForm(ContractContentForm, InviteEmailForm):
@@ -287,10 +262,10 @@ class CommentForm(APIForm):
         ContractComment.objects.create(..., **form.comment_fields())
     """
 
-    body = forms.CharField(required=False)
-    clauseId = forms.CharField(required=False)
-    quotedText = forms.CharField(required=False)
-    clauseIndex = forms.CharField(required=False)
+    body = forms.CharField(required=False, max_length=2000)
+    clauseId = forms.CharField(required=False, max_length=64)
+    quotedText = forms.CharField(required=False, max_length=1000)
+    clauseIndex = forms.CharField(required=False, max_length=100)
 
     def __init__(self, data=None, *args, contract=None, **kwargs):
         self.contract = contract
@@ -355,7 +330,7 @@ class GuestCommentForm(CommentForm):
 
 
 class CommentStatusForm(APIForm):
-    status = forms.CharField(required=False)
+    status = forms.CharField(required=False, max_length=20)
 
     def clean_status(self):
         status = (self.cleaned_data.get("status") or "").strip().lower()
@@ -372,8 +347,8 @@ class InvitationSignForm(APIForm):
     MODE_ACCOUNT = "account"
     MODE_GUEST = "guest"
 
-    mode = forms.CharField(required=False)
-    signerName = forms.CharField(required=False)
+    mode = forms.CharField(required=False, max_length=20)
+    signerName = forms.CharField(required=False, max_length=200)
 
     def clean_mode(self):
         if "mode" not in self.data:

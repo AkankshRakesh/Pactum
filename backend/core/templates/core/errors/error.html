@@ -1,0 +1,12 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ status_code }} · Pactum{% endblock %}
+
+{% block body %}
+<main style="max-width: 42rem; margin: 12rem auto; padding: 2rem; text-align: center;">
+  <p style="font: 700 0.75rem/1.4 Arial, sans-serif; letter-spacing: 0.16em;">PACTUM</p>
+  <h1 style="font: 700 3rem/1.1 Georgia, serif; margin: 1rem 0;">{{ status_code }}</h1>
+  <p style="font: 1rem/1.6 Arial, sans-serif;">{{ detail }}</p>
+  <a href="/" style="font: 700 0.9rem/1.4 Arial, sans-serif;">Return home</a>
+</main>
+{% endblock %}

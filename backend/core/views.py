@@ -28,6 +28,46 @@ from .forms import (
 from .models import Contract, ContractComment, ContractInvitation
 
 
+def _wants_json_error(request):
+    return request.path.startswith("/api/") or "application/json" in request.headers.get(
+        "Accept", ""
+    )
+
+
+def _error_response(request, status, detail, code):
+    if _wants_json_error(request):
+        return JsonResponse(
+            {"detail": detail, "status": status, "code": code},
+            status=status,
+        )
+    return render(
+        request,
+        "core/errors/error.html",
+        {"status_code": status, "detail": detail},
+        status=status,
+    )
+
+
+def bad_request(request, exception):
+    return _error_response(request, 400, "The request could not be understood.", "bad_request")
+
+
+def permission_denied(request, exception):
+    return _error_response(request, 403, "You do not have permission to perform this action.", "permission_denied")
+
+
+def page_not_found(request, exception):
+    return _error_response(request, 404, "The requested resource was not found.", "not_found")
+
+
+def server_error(request):
+    return _error_response(request, 500, "An unexpected server error occurred.", "server_error")
+
+
+def csrf_failure(request, reason=""):
+    return _error_response(request, 403, "CSRF verification failed. Refresh and try again.", "csrf_failed")
+
+
 @require_GET
 def health(_request):
     """Return a lightweight liveness response for load balancer checks."""
@@ -192,14 +232,7 @@ def api_login_required(view_func):
 
 
 def home(request):
-    context = {
-        "preamble_lines": PREAMBLE_TEXT.split("\n\n"),
-        "clauses": CLAUSES,
-        "guarantees": GUARANTEES,
-        "plans": PLANS,
-        "record": RECORD,
-    }
-    return render(request, "core/home.html", context)
+    return JsonResponse({"status": "ok"})
 
 
 User = get_user_model()

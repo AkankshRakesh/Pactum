@@ -363,11 +363,11 @@ export default function AuthPage() {
               </div>
             )}
 
-            {!isSignup && (
+            {/* {!isSignup && (
               <div className="-mt-2 mb-5 text-right">
                 <span className="cursor-pointer text-xs text-[#8B2635] dark:text-[#C1445A]">Forgot password?</span>
               </div>
-            )}
+            )} */}
 
             <button
               type="submit"
