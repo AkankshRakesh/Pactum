@@ -665,6 +665,15 @@ Before using the pipeline:
 4. Replace the `latest` image tag with immutable commit or release tags.
 5. Add a database backup and restore procedure.
 
+
+### Deployment images
+
+![st](images/cf.png)
+![gannt](images/gannt.png)
+![graph](images/graph.png)
+![vpc](images/vpc.png)
+![tg](images/tg.png)
+
 ---
 
 ## Operations and troubleshooting
