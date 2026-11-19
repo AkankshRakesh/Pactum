@@ -35,9 +35,6 @@ The repository is a two-application system:
 - [Security model](#security-model)
 - [DevOps and deployment architecture](#devops-and-deployment-architecture)
 - [Operations and troubleshooting](#operations-and-troubleshooting)
-- [Validation](#validation)
-- [Known limitations](#known-limitations)
-- [Contributing](#contributing)
 
 ---
 
@@ -756,8 +753,3 @@ Frontend production build:
 cd frontend
 npm run build
 ```
-
-The repository currently does not contain a Django `tests.py` or a dedicated
-backend test suite. Add focused tests for authentication, CSRF, invitation
-expiration, ownership checks, comment permissions, migrations, and signing
-before treating a production deployment as fully verified.
