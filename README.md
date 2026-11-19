@@ -761,33 +761,3 @@ The repository currently does not contain a Django `tests.py` or a dedicated
 backend test suite. Add focused tests for authentication, CSRF, invitation
 expiration, ownership checks, comment permissions, migrations, and signing
 before treating a production deployment as fully verified.
-
----
-
-## Known limitations
-
-- No backend Dockerfile is present, although Jenkins and the deployment process
-  require one.
-- No frontend Dockerfile or Kubernetes deployment is present.
-- The CloudFormation load balancer is HTTP-only.
-- The default development secret-key fallback must not be used in production.
-- The local `.env` file must never be committed or copied into an image.
-- No automated Django test suite is currently included.
-- SQLite is suitable for local development only, not for multiple production
-  replicas.
-- The application has application-level authorization checks, but no separate
-  custom Django permission classes or role model.
-
----
-
-## Contributing
-
-1. Create a feature branch.
-2. Keep changes scoped to the feature or fix.
-3. Add or update focused tests when behavior changes.
-4. Run Django checks and frontend lint/build locally.
-5. Review migration files before applying them.
-6. Never commit secrets, local databases, virtual environments, `node_modules`,
-   or build output.
-7. Open a pull request describing configuration, migration, and deployment
-   implications.
