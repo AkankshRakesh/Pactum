@@ -8,6 +8,8 @@ clause-level comments, and complete signing through an authenticated account or
 a secure guest invitation link. The application preserves the contract,
 invitation, comments, and signing state in a Django-backed database.
 
+![Home](images/home.png)
+
 The repository is a two-application system:
 
 - **Django** provides the JSON API, authentication, sessions, validation,
@@ -16,13 +18,6 @@ The repository is a two-application system:
 - **Next.js** provides the browser application. Its App Router pages and React
   components call the Django API and include a server-side proxy route for
   same-origin browser requests.
-
-> **Repository status:** the Kubernetes and AWS deployment definitions are
-> present, but this checkout does not currently contain `backend/Dockerfile`,
-> `frontend/Dockerfile`, a frontend Kubernetes workload, or a root
-> `bootstrap.sh`. The Jenkins pipeline expects `backend/Dockerfile`, so the
-> container deployment cannot complete until that expected artifact is added or
-> the pipeline is changed.
 
 ---
 
@@ -87,6 +82,8 @@ The repository is a two-application system:
    - Django Admin
 ```
 
+![ER](images/image.png)
+
 In the deployed design, the backend path is:
 
 ```text
@@ -112,8 +109,7 @@ to the Django load balancer, while browser API calls normally use
 pactum/
 ├── README.md
 ├── Jenkinsfile
-├── home.png
-├── image.png
+├── images/
 ├── backend/
 │   ├── manage.py
 │   ├── requirements.txt
@@ -536,6 +532,14 @@ Production requirements:
 ## DevOps and deployment architecture
 
 A detailed devops report pdf is also attached in the repo.
+
+### Devops Architecture
+
+![Arch](images/devarch.png)
+
+![ArchEc2](images/ec2.png)
+
+![ArchK3](images/k3.png)
 
 ### Infrastructure provisioned by CloudFormation
 
